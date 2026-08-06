@@ -29,7 +29,7 @@ export default function App() {
     Motor6: true
   });
 
-  // SCADA ტელემეტრიის საწყისი მდგომარეობა (ნორმალურ რეჟიმში ავარიული ძაბვა არის "-")
+  // SCADA ტელემეტრიის საწყისი მდგომარეობა
   const [telemetry, setTelemetry] = useState({
     currentVal: "414 A",
     voltageVal: "110.0 კვ",
@@ -38,7 +38,7 @@ export default function App() {
     modeColor: "#a6e3a1",
     activeProtection: "-",
     faultCurrentVal: "0 A",
-    faultVoltageVal: "-",       // გასწორდა: ნორმალურ რეჟიმში ავარიული ძაბვა არ არის
+    faultVoltageVal: "-",
     tripTimeVal: "0.00 წმ",
     faultDistanceVal: "-",
     zeroSeqVal: "0 A",
@@ -88,15 +88,12 @@ export default function App() {
   };
 
   // =========================================================
-  // 2. ზუსტი დინამიკური გაანგარიშება
+  // 2. დინამიკური გაანგარიშება
   // =========================================================
-  
-  // 110კვ ეგხ მაგისტრალის დენი
   const lineACurrentVal = (statuses.LineA && statuses.Bus1) 
     ? Math.round(300 * (systemSettings.lineLength / 50)) 
     : 0;
 
-  // ა) დაბალი ძაბვის მხარის რეალური დენები
   const t1_10_city = (statuses.T1 && statuses.Bus1 && statuses.FeederCity) 
     ? Math.round(250 * (systemSettings.t1Nominal / 63) * (8 / systemSettings.lineLength10)) 
     : 0;
@@ -113,10 +110,8 @@ export default function App() {
     ? Math.round(160 * (systemSettings.t2Nominal / 40)) 
     : 0;
 
-  // ბ) ტრანსფორმატორების ჯამური დენი დაბალი ძაბვის მხარეს
   const t1_LV_TotalCurrent = t1_10_city + t1_10_reg; 
 
-  // გ) ტრანსფორმატორების დენები 110კვ (მაღალ) მხარეს: I_HV = I_LV * (U_LV / U_HV)
   const t1_110_Current = (statuses.T1 && statuses.Bus1) 
     ? Math.round(t1_LV_TotalCurrent * (10 / 110)) 
     : 0;
@@ -125,10 +120,8 @@ export default function App() {
     ? Math.round(t2_35_factory * (35 / 110) + t2_6_motor * (6 / 110)) 
     : 0;
 
-  // დ) 110კვ სალტეების სრული დატვირთვა
   const total110Load = lineACurrentVal + t1_110_Current + t2_110_Current;
 
-  // ე) ავტოტრანსფორმატორების გადანაწილება 110კვ და 220კვ მხარეებზე
   let at1_110_Current = 0;
   let at2_110_Current = 0;
 
@@ -149,7 +142,6 @@ export default function App() {
     at2_110_Current = 0;
   }
 
-  // 220კვ მხარის დენი (ზუსტი ტრანსფორმაციის კოეფიციენტით: I_220 = I_110 * 110 / 220 = 0.5 * I_110)
   const at1_220_Current = Math.round(at1_110_Current * (110 / 220));
   const at2_220_Current = Math.round(at2_110_Current * (110 / 220));
 
@@ -158,7 +150,7 @@ export default function App() {
   };
 
   // =========================================================
-  // 3. ავარიული რეჟიმების იმიტაცია და SCADA განახლება
+  // 3. ავარიების სიმულაცია
   // =========================================================
   const triggerFault = (faultType) => {
     let nodeKey = null;
@@ -295,7 +287,7 @@ export default function App() {
       modeColor: faultType === 'bus_coupler_fault' ? "#f9e2af" : "#f38ba8",
       activeProtection: faultData.relay,
       faultCurrentVal: faultData.fCurrent,
-      faultVoltageVal: faultData.fVoltage, // შეივსება მხოლოს რეალური ავარიისას
+      faultVoltageVal: faultData.fVoltage,
       tripTimeVal: faultData.time,
       faultDistanceVal: faultData.dist,
       zeroSeqVal: faultData.zeroSeq,
@@ -327,72 +319,89 @@ export default function App() {
   };
 
   return (
-    <div className="w-screen min-h-screen bg-[#0f0f14] p-3 flex flex-col box-border m-0 overflow-x-hidden font-sans text-[#cdd6f4]">
+    <div style={{ width: '100vw', minHeight: '100vh', backgroundColor: '#0f0f14', padding: '12px', boxSizing: 'border-box', fontFamily: 'sans-serif', color: '#cdd6f4' }}>
       
+      {/* CSS სტილების იძულებითი აღდგენა Tailwind Reset-ის დასაძლევად */}
+      <style>{`
+        .flow-line { stroke-dasharray: 6,6; stroke-width: 2.5; animation: dash 1s linear infinite; }
+        .flow-line.active { stroke: #a6e3a1; }
+        .flow-line.tripped { stroke: #f38ba8; stroke-dasharray: none; }
+        @keyframes dash { to { stroke-dashoffset: -12; } }
+      `}</style>
+
       {/* სათაური */}
-      <h1 className="text-[#89b4fa] text-[18px] mb-[10px] font-bold text-center flex items-center justify-center gap-2">
-        <span>⚡</span> SEL რელეების კვანძური ქვესადგურის ინტელექტუალური მოდელი
+      <h1 style={{ color: '#89b4fa', fontSize: '18px', marginBottom: '10px', marginTop: 0, fontWeight: 'bold', textAlign: 'center' }}>
+        ⚡ SEL რელეების კვანძური ქვესადგურის ინტელექტუალური მოდელი
       </h1>
 
-      {/* Control Panel (2x4 Grid) */}
-      <div className="bg-[#161622] p-[12px] rounded-[6px] mb-[10px] border border-[#313244] shadow-md flex flex-col gap-3">
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-x-6 gap-y-3 items-center">
-          <div className="flex items-center justify-between gap-2">
-            <label className="text-[#cdd6f4] text-[11px] whitespace-nowrap">🛣️ 110კვ ხაზი (კმ):</label>
-            <input type="number" name="lineLength" value={systemSettings.lineLength} onChange={handleInputChange} className="w-[70px] bg-[#1e1e2e] text-[#cdd6f4] border border-[#45475a] p-[3px_6px] rounded text-center text-[11px]" />
+      {/* Control Panel - მკაცრი 2 სვეტიანი / 4 სვეტიანი Grid */}
+      <div style={{ backgroundColor: '#161622', padding: '12px', borderRadius: '6px', marginBottom: '10px', border: '1px solid #313244', boxShadow: '0 4px 6px rgba(0,0,0,0.3)' }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '8px 16px', alignItems: 'center' }}>
+          
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <label style={{ fontSize: '11px' }}>🛣️ 110კვ ხაზი (კმ):</label>
+            <input type="number" name="lineLength" value={systemSettings.lineLength} onChange={handleInputChange} style={{ width: '70px', backgroundColor: '#1e1e2e', color: '#cdd6f4', border: '1px solid #45475a', padding: '3px 6px', borderRadius: '4px', textAlign: 'center', fontSize: '11px' }} />
           </div>
-          <div className="flex items-center justify-between gap-2">
-            <label className="text-[#cdd6f4] text-[11px] whitespace-nowrap">🌀 AT-2 სიმძლავრე (MVA):</label>
-            <input type="number" name="at2Nominal" value={systemSettings.at2Nominal} onChange={handleInputChange} className="w-[70px] bg-[#1e1e2e] text-[#cdd6f4] border border-[#45475a] p-[3px_6px] rounded text-center text-[11px]" />
+
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <label style={{ fontSize: '11px' }}>🌀 AT-2 სიმძლავრე (MVA):</label>
+            <input type="number" name="at2Nominal" value={systemSettings.at2Nominal} onChange={handleInputChange} style={{ width: '70px', backgroundColor: '#1e1e2e', color: '#cdd6f4', border: '1px solid #45475a', padding: '3px 6px', borderRadius: '4px', textAlign: 'center', fontSize: '11px' }} />
           </div>
-          <div className="flex items-center justify-between gap-2">
-            <label className="text-[#cdd6f4] text-[11px] whitespace-nowrap">⚡ T-2 სიმძლავრე (MVA):</label>
-            <input type="number" name="t2Nominal" value={systemSettings.t2Nominal} onChange={handleInputChange} className="w-[70px] bg-[#1e1e2e] text-[#cdd6f4] border border-[#45475a] p-[3px_6px] rounded text-center text-[11px]" />
+
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <label style={{ fontSize: '11px' }}>⚡ T-2 სიმძლავრე (MVA):</label>
+            <input type="number" name="t2Nominal" value={systemSettings.t2Nominal} onChange={handleInputChange} style={{ width: '70px', backgroundColor: '#1e1e2e', color: '#cdd6f4', border: '1px solid #45475a', padding: '3px 6px', borderRadius: '4px', textAlign: 'center', fontSize: '11px' }} />
           </div>
-          <div className="flex items-center justify-between gap-2">
-            <label className="text-[#cdd6f4] text-[11px] whitespace-nowrap">🏙️ 10კვ საქალაქო (კმ):</label>
-            <input type="number" name="lineLength10" value={systemSettings.lineLength10} onChange={handleInputChange} className="w-[70px] bg-[#1e1e2e] text-[#cdd6f4] border border-[#45475a] p-[3px_6px] rounded text-center text-[11px]" />
+
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <label style={{ fontSize: '11px' }}>🏙️ 10კვ საქალაქო (კმ):</label>
+            <input type="number" name="lineLength10" value={systemSettings.lineLength10} onChange={handleInputChange} style={{ width: '70px', backgroundColor: '#1e1e2e', color: '#cdd6f4', border: '1px solid #45475a', padding: '3px 6px', borderRadius: '4px', textAlign: 'center', fontSize: '11px' }} />
           </div>
-          <div className="flex items-center justify-between gap-2">
-            <label className="text-[#cdd6f4] text-[11px] whitespace-nowrap">🌀 AT-1 სიმძლავრე (MVA):</label>
-            <input type="number" name="at1Nominal" value={systemSettings.at1Nominal} onChange={handleInputChange} className="w-[70px] bg-[#1e1e2e] text-[#cdd6f4] border border-[#45475a] p-[3px_6px] rounded text-center text-[11px]" />
+
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <label style={{ fontSize: '11px' }}>🌀 AT-1 სიმძლავრე (MVA):</label>
+            <input type="number" name="at1Nominal" value={systemSettings.at1Nominal} onChange={handleInputChange} style={{ width: '70px', backgroundColor: '#1e1e2e', color: '#cdd6f4', border: '1px solid #45475a', padding: '3px 6px', borderRadius: '4px', textAlign: 'center', fontSize: '11px' }} />
           </div>
-          <div className="flex items-center justify-between gap-2">
-            <label className="text-[#cdd6f4] text-[11px] whitespace-nowrap">⚡ T-1 სიმძლავრე (MVA):</label>
-            <input type="number" name="t1Nominal" value={systemSettings.t1Nominal} onChange={handleInputChange} className="w-[70px] bg-[#1e1e2e] text-[#cdd6f4] border border-[#45475a] p-[3px_6px] rounded text-center text-[11px]" />
+
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <label style={{ fontSize: '11px' }}>⚡ T-1 სიმძლავრე (MVA):</label>
+            <input type="number" name="t1Nominal" value={systemSettings.t1Nominal} onChange={handleInputChange} style={{ width: '70px', backgroundColor: '#1e1e2e', color: '#cdd6f4', border: '1px solid #45475a', padding: '3px 6px', borderRadius: '4px', textAlign: 'center', fontSize: '11px' }} />
           </div>
-          <div className="flex items-center justify-between gap-2">
-            <label className="text-[#cdd6f4] text-[11px] whitespace-nowrap">🏭 35კვ ხაზი (კმ):</label>
-            <input type="number" name="lineLength35" value={systemSettings.lineLength35} onChange={handleInputChange} className="w-[70px] bg-[#1e1e2e] text-[#cdd6f4] border border-[#45475a] p-[3px_6px] rounded text-center text-[11px]" />
+
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <label style={{ fontSize: '11px' }}>🏭 35კვ ხაზი (კმ):</label>
+            <input type="number" name="lineLength35" value={systemSettings.lineLength35} onChange={handleInputChange} style={{ width: '70px', backgroundColor: '#1e1e2e', color: '#cdd6f4', border: '1px solid #45475a', padding: '3px 6px', borderRadius: '4px', textAlign: 'center', fontSize: '11px' }} />
           </div>
-          <div className="flex items-center justify-between gap-2">
-            <label className="text-[#cdd6f4] text-[11px] whitespace-nowrap">📐 10კვ რეგიონული (კმ):</label>
-            <input type="number" name="lineLengthRegional10" value={systemSettings.lineLengthRegional10} onChange={handleInputChange} className="w-[70px] bg-[#1e1e2e] text-[#cdd6f4] border border-[#45475a] p-[3px_6px] rounded text-center text-[11px]" />
+
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <label style={{ fontSize: '11px' }}>📐 10კვ რეგიონული (კმ):</label>
+            <input type="number" name="lineLengthRegional10" value={systemSettings.lineLengthRegional10} onChange={handleInputChange} style={{ width: '70px', backgroundColor: '#1e1e2e', color: '#cdd6f4', border: '1px solid #45475a', padding: '3px 6px', borderRadius: '4px', textAlign: 'center', fontSize: '11px' }} />
           </div>
+
         </div>
 
-        <div className="flex justify-end mt-1">
+        <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '8px' }}>
           <button 
             onClick={recalculateSystem} 
-            className="cursor-pointer bg-[#89b4fa] text-[#11111b] border-none px-6 py-1.5 rounded-[4px] font-bold text-[11px] hover:bg-[#74c7ec] transition-colors flex items-center gap-1 shadow"
+            style={{ cursor: 'pointer', backgroundColor: '#89b4fa', color: '#11111b', border: 'none', padding: '6px 16px', borderRadius: '4px', fontWeight: 'bold', fontSize: '11px' }}
           >
             📊 გადაანგარიშება
           </button>
         </div>
       </div>
 
-      {/* Main Grid Container */}
-      <div className="grid grid-cols-1 lg:grid-cols-[1fr_380px] gap-[10px] w-full flex-1">
+      {/* 2-სვეტიანი მთავარი განლაგება (სქემა მარცხნივ, SCADA/Logs მარჯვნივ) */}
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 360px', gap: '10px', width: '100%' }}>
         
-        {/* Left Panel */}
-        <div className="bg-[#161622] rounded-[6px] p-[10px] shadow-lg border border-[#313244] flex flex-col">
-          <h3 className="mt-0 text-[#89b4fa] border-b border-[#313244] pb-[4px] text-[13px] font-bold flex items-center gap-1">
+        {/* მარცხენა პანელი: სქემა და ავარიები */}
+        <div style={{ backgroundColor: '#161622', borderRadius: '6px', padding: '10px', border: '1px solid #313244' }}>
+          <h3 style={{ margin: 0, color: '#89b4fa', borderBottom: '1px solid #313244', paddingBottom: '4px', fontSize: '13px', fontWeight: 'bold' }}>
             🌐 ქვესადგურის ტექნოლოგიური სქემა
           </h3>
           
-          <div className="bg-[#07070a] border border-[#313244] rounded-[6px] h-[500px] relative overflow-hidden mt-[8px]" ref={gridRef}>
+          <div style={{ backgroundColor: '#07070a', border: '1px solid #313244', borderRadius: '6px', height: '500px', relative: 'relative', position: 'relative', overflow: 'hidden', marginTop: '8px' }} ref={gridRef}>
             
-            <svg className="absolute top-0 left-0 w-full h-full pointer-events-none z-[1]">
+            <svg style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', pointerEvents: 'none', zIndex: 1 }}>
               <defs>
                 <marker id="arrow-green" viewBox="0 0 10 10" refX="6" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
                   <path d="M 0 0 L 10 5 L 0 10 z" fill="#a6e3a1" />
@@ -422,21 +431,18 @@ export default function App() {
               <path className={statuses.T2 && statuses.Feeder35 ? "flow-line active" : "flow-line tripped"} d="M 620 385 L 535 450" markerEnd={statuses.T2 && statuses.Feeder35 ? "url(#arrow-green)" : "url(#arrow-red)"} />
               <path className={statuses.T2 && statuses.Motor6 ? "flow-line active" : "flow-line tripped"} d="M 620 385 L 705 450" markerEnd={statuses.T2 && statuses.Motor6 ? "url(#arrow-green)" : "url(#arrow-red)"} />
 
-              {/* AT-1 & AT-2 220kV მხარის დენები (შესასვლელი) */}
+              {/* დენების წარწერები */}
               <text x="180" y="80" fill={statuses.AT1 ? "#a6e3a1" : "#f38ba8"} fontSize="9px" fontFamily="monospace" fontWeight="bold">{`⬇ 220kV: ${at1_220_Current} A`}</text>
               <text x="650" y="80" fill={statuses.AT2 ? "#a6e3a1" : "#f38ba8"} fontSize="9px" fontFamily="monospace" fontWeight="bold">{`⬇ 220kV: ${at2_220_Current} A`}</text>
 
-              {/* AT-1 & AT-2 110kV მხარის დენები (გამოსასვლელი სალტეზე - 2-ჯერ მეტი დენი) */}
               <text x="245" y="195" fill={statuses.AT1 && statuses.Bus1 ? "#a6e3a1" : "#f38ba8"} fontSize="10px" fontFamily="monospace" fontWeight="bold">{`⬇ 110kV: ${at1_110_Current} A`}</text>
               <text x="595" y="195" fill={statuses.AT2 && statuses.Bus2 ? "#a6e3a1" : "#f38ba8"} fontSize="10px" fontFamily="monospace" fontWeight="bold">{`⬇ 110kV: ${at2_110_Current} A`}</text>
 
               <text x="140" y="275" fill={statuses.LineA && statuses.Bus1 ? "#a6e3a1" : "#f38ba8"} fontSize="10px" fontFamily="monospace" fontWeight="bold">{`⬇ ${lineACurrentVal} A`}</text>
               
-              {/* T-1 და T-2 მაღალ (110კვ) მხარეს დენები */}
               <text x="330" y="275" fill={statuses.T1 && statuses.Bus1 ? "#a6e3a1" : "#f38ba8"} fontSize="10px" fontFamily="monospace" fontWeight="bold">{`⬇ ${t1_110_Current} A (110kV)`}</text>
               <text x="630" y="275" fill={statuses.T2 && statuses.Bus2 ? "#a6e3a1" : "#f38ba8"} fontSize="10px" fontFamily="monospace" fontWeight="bold">{`⬇ ${t2_110_Current} A (110kV)`}</text>
 
-              {/* დაბალ ძაბვაზე ცალკეული ფიდერების დენები */}
               <text x="195" y="425" fill={statuses.T1 && statuses.FeederCity ? "#a6e3a1" : "#f38ba8"} fontSize="10px" fontFamily="monospace" fontWeight="bold">{`⬇ ${t1_10_city} A`}</text>
               <text x="365" y="425" fill={statuses.T1 && statuses.FeederReg ? "#a6e3a1" : "#f38ba8"} fontSize="10px" fontFamily="monospace" fontWeight="bold">{`⬇ ${t1_10_reg} A`}</text>
               <text x="495" y="425" fill={statuses.T2 && statuses.Feeder35 ? "#a6e3a1" : "#f38ba8"} fontSize="10px" fontFamily="monospace" fontWeight="bold">{`⬇ ${t2_35_factory} A`}</text>
@@ -444,176 +450,170 @@ export default function App() {
             </svg>
 
             {sparkPos.show && (
-              <div className="absolute text-[24px] z-[5] -translate-x-1/2 -translate-y-1/2 animate-ping" style={{ left: sparkPos.x, top: sparkPos.y }}>⚡</div>
+              <div style={{ position: 'absolute', fontSize: '24px', zIndex: 5, transform: 'translate(-50%, -50%)', left: sparkPos.x, top: sparkPos.y }}>⚡</div>
             )}
 
             {/* 220kV Bus */}
-            <div className="absolute bg-[#fab387] h-[6px] rounded-[3px] z-[2] top-[26px] left-[17%] w-[70%]" ref={nodeRefs.gen}>
-              <span className="absolute -top-[16px] left-[10px] text-[10px] font-bold text-[#cdd6f4]">220 კვ სისტემური სალტე</span>
+            <div style={{ position: 'absolute', backgroundColor: '#fab387', height: '6px', borderRadius: '3px', zIndex: 2, top: '26px', left: '17%', width: '70%' }} ref={nodeRefs.gen}>
+              <span style={{ position: 'absolute', top: '-16px', left: '10px', fontSize: '10px', fontWeight: 'bold', color: '#cdd6f4' }}>220 კვ სისტემური სალტე</span>
             </div>
 
             {/* AT-1 & AT-2 */}
-            <div className={`absolute flex flex-col items-center p-[4px] rounded-[4px] text-center z-[3] w-[130px] border ${statuses.AT1 ? 'bg-[#1e1e2e] border-[#fab387]' : 'bg-[#2a171e] border-[#f38ba8]'}`} ref={nodeRefs.at1} style={{ left: '170px', top: '105px' }}>
-              <div className="text-[9px] font-bold text-[#cdd6f4]">AT-1 (220/110 კვ)</div>
-              <div className="bg-[#11111b] text-[#fab387] font-mono text-[8px] px-[3px] py-[1px] rounded mt-[2px] border border-[#313244]">SEL-487E</div>
-              <div className="text-[7px] font-bold mt-[1px]" style={{ color: statuses.AT1 ? '#a6e3a1' : '#f38ba8' }}>{statuses.AT1 ? 'ჩართულია' : 'გათიშულია (0A)'}</div>
+            <div ref={nodeRefs.at1} style={{ position: 'absolute', left: '170px', top: '105px', width: '130px', padding: '4px', borderRadius: '4px', textAlign: 'center', zIndex: 3, border: '1px solid', backgroundColor: statuses.AT1 ? '#1e1e2e' : '#2a171e', borderColor: statuses.AT1 ? '#fab387' : '#f38ba8' }}>
+              <div style={{ fontSize: '9px', fontWeight: 'bold' }}>AT-1 (220/110 კვ)</div>
+              <div style={{ backgroundColor: '#11111b', color: '#fab387', fontFamily: 'monospace', fontSize: '8px', padding: '1px 3px', borderRadius: '2px', marginTop: '2px' }}>SEL-487E</div>
+              <div style={{ fontSize: '7px', fontWeight: 'bold', marginTop: '1px', color: statuses.AT1 ? '#a6e3a1' : '#f38ba8' }}>{statuses.AT1 ? 'ჩართულია' : 'გათიშულია'}</div>
             </div>
 
-            <div className={`absolute flex flex-col items-center p-[4px] rounded-[4px] text-center z-[3] w-[130px] border ${statuses.AT2 ? 'bg-[#1e1e2e] border-[#fab387]' : 'bg-[#2a171e] border-[#f38ba8]'}`} ref={nodeRefs.at2} style={{ left: '640px', top: '105px' }}>
-              <div className="text-[9px] font-bold text-[#cdd6f4]">AT-2 (220/110 კვ)</div>
-              <div className="bg-[#11111b] text-[#fab387] font-mono text-[8px] px-[3px] py-[1px] rounded mt-[2px] border border-[#313244]">SEL-487E</div>
-              <div className="text-[7px] font-bold mt-[1px]" style={{ color: statuses.AT2 ? '#a6e3a1' : '#f38ba8' }}>{statuses.AT2 ? 'ჩართულია' : 'გათიშულია (0A)'}</div>
+            <div ref={nodeRefs.at2} style={{ position: 'absolute', left: '640px', top: '105px', width: '130px', padding: '4px', borderRadius: '4px', textAlign: 'center', zIndex: 3, border: '1px solid', backgroundColor: statuses.AT2 ? '#1e1e2e' : '#2a171e', borderColor: statuses.AT2 ? '#fab387' : '#f38ba8' }}>
+              <div style={{ fontSize: '9px', fontWeight: 'bold' }}>AT-2 (220/110 კვ)</div>
+              <div style={{ backgroundColor: '#11111b', color: '#fab387', fontFamily: 'monospace', fontSize: '8px', padding: '1px 3px', borderRadius: '2px', marginTop: '2px' }}>SEL-487E</div>
+              <div style={{ fontSize: '7px', fontWeight: 'bold', marginTop: '1px', color: statuses.AT2 ? '#a6e3a1' : '#f38ba8' }}>{statuses.AT2 ? 'ჩართულია' : 'გათიშულია'}</div>
             </div>
 
             {/* 110kV Bus Sections */}
-            <div className={`absolute h-[6px] rounded-[3px] z-[2] left-[8%] top-[220px] w-[35%] ${statuses.Bus1 ? 'bg-[#89b4fa]' : 'bg-[#f38ba8]'}`} ref={nodeRefs.bus110_1}>
-              <span className="absolute -top-[16px] left-[5px] text-[9px] font-bold text-[#cdd6f4]">110 კვ სალტე - I სექცია</span>
+            <div ref={nodeRefs.bus110_1} style={{ position: 'absolute', height: '6px', borderRadius: '3px', zIndex: 2, left: '8%', top: '220px', width: '35%', backgroundColor: statuses.Bus1 ? '#89b4fa' : '#f38ba8' }}>
+              <span style={{ position: 'absolute', top: '-16px', left: '5px', fontSize: '9px', fontWeight: 'bold' }}>110 კვ სალტე - I სექცია</span>
             </div>
 
-            <div className={`absolute flex flex-col items-center p-[3px_6px] rounded-[4px] text-center z-[3] w-[110px] border ${statuses.Coupler ? 'bg-[#242535] border-[#89b4fa]' : 'bg-[#2a171e] border-[#f38ba8]'}`} ref={nodeRefs.coupler} style={{ left: '45%', top: '198px' }}>
-              <div className="text-[8px] font-bold">⏹️ სექციური Q-110</div>
-              <div className="bg-[#11111b] text-[#fab387] font-mono text-[7px] px-[2px] py-[1px] rounded mt-[1px]">SEL-451</div>
-              <div className="text-[7px] font-bold mt-[1px]" style={{ color: statuses.Coupler ? '#a6e3a1' : '#f38ba8' }}>
-                {statuses.Coupler ? 'ჩართულია' : 'გამორთულია'}
-              </div>
+            <div ref={nodeRefs.coupler} style={{ position: 'absolute', left: '45%', top: '198px', width: '110px', padding: '3px 6px', borderRadius: '4px', textAlign: 'center', zIndex: 3, border: '1px solid', backgroundColor: statuses.Coupler ? '#242535' : '#2a171e', borderColor: statuses.Coupler ? '#89b4fa' : '#f38ba8' }}>
+              <div style={{ fontSize: '8px', fontWeight: 'bold' }}>⏹️ სექციური Q-110</div>
+              <div style={{ backgroundColor: '#11111b', color: '#fab387', fontFamily: 'monospace', fontSize: '7px', padding: '1px 2px', borderRadius: '2px', marginTop: '1px' }}>SEL-451</div>
+              <div style={{ fontSize: '7px', fontWeight: 'bold', marginTop: '1px', color: statuses.Coupler ? '#a6e3a1' : '#f38ba8' }}>{statuses.Coupler ? 'ჩართულია' : 'გამორთულია'}</div>
             </div>
 
-            <div className={`absolute h-[6px] rounded-[3px] z-[2] left-[57%] top-[220px] w-[35%] ${statuses.Bus2 ? 'bg-[#89b4fa]' : 'bg-[#f38ba8]'}`} ref={nodeRefs.bus110_2}>
-              <span className="absolute -top-[16px] left-[5px] text-[9px] font-bold text-[#cdd6f4]">110 კვ სალტე - II სექცია</span>
+            <div ref={nodeRefs.bus110_2} style={{ position: 'absolute', height: '6px', borderRadius: '3px', zIndex: 2, left: '57%', top: '220px', width: '35%', backgroundColor: statuses.Bus2 ? '#89b4fa' : '#f38ba8' }}>
+              <span style={{ position: 'absolute', top: '-16px', left: '5px', fontSize: '9px', fontWeight: 'bold' }}>110 კვ სალტე - II სექცია</span>
             </div>
 
             {/* Feeders & Transformers */}
-            <div className={`absolute flex flex-col items-center p-[4px] rounded-[4px] text-center z-[3] w-[120px] border ${statuses.LineA && statuses.Bus1 ? 'bg-[#1e1e2e] border-[#a6e3a1]' : 'bg-[#2a171e] border-[#f38ba8]'}`} ref={nodeRefs.userA} style={{ left: '105px', top: '310px' }}>
-              <div className="text-[8px] font-bold text-[#cdd6f4]">🛣️ ეგხ "მაგისტრალი ა"</div>
-              <div className="bg-[#11111b] text-[#fab387] font-mono text-[7px] px-[2px] py-[1px] rounded mt-[1px]">SEL-311L</div>
-              <div className="text-[7px] font-bold mt-[1px]" style={{ color: statuses.LineA && statuses.Bus1 ? '#a6e3a1' : '#f38ba8' }}>{statuses.LineA && statuses.Bus1 ? 'ჩართულია' : 'გათიშულია'}</div>
+            <div ref={nodeRefs.userA} style={{ position: 'absolute', left: '105px', top: '310px', width: '120px', padding: '4px', borderRadius: '4px', textAlign: 'center', zIndex: 3, border: '1px solid', backgroundColor: statuses.LineA && statuses.Bus1 ? '#1e1e2e' : '#2a171e', borderColor: statuses.LineA && statuses.Bus1 ? '#a6e3a1' : '#f38ba8' }}>
+              <div style={{ fontSize: '8px', fontWeight: 'bold' }}>🛣️ ეგხ "მაგისტრალი ა"</div>
+              <div style={{ backgroundColor: '#11111b', color: '#fab387', fontFamily: 'monospace', fontSize: '7px', padding: '1px 2px', borderRadius: '2px', marginTop: '1px' }}>SEL-311L</div>
+              <div style={{ fontSize: '7px', fontWeight: 'bold', marginTop: '1px', color: statuses.LineA && statuses.Bus1 ? '#a6e3a1' : '#f38ba8' }}>{statuses.LineA && statuses.Bus1 ? 'ჩართულია' : 'გათიშულია'}</div>
             </div>
 
-            {/* T-1 Block with dynamic LV & HV current readouts */}
-            <div className={`absolute flex flex-col items-center p-[4px] rounded-[4px] text-center z-[3] w-[125px] border ${statuses.T1 && statuses.Bus1 ? 'bg-[#1e1e2e] border-[#f9e2af]' : 'bg-[#2a171e] border-[#f38ba8]'}`} ref={nodeRefs.trans1} style={{ left: '260px', top: '310px' }}>
-              <div className="text-[8px] font-bold text-[#cdd6f4]">⚡ ტრანსფ. T-1 (110/10კვ)</div>
-              <div className="bg-[#11111b] text-[#fab387] font-mono text-[7px] px-[2px] py-[1px] rounded mt-[1px]">SEL-487E</div>
-              <div className="text-[7px] font-mono mt-[2px] text-[#89b4fa]">{`10kV: ${t1_LV_TotalCurrent}A | 110kV: ${t1_110_Current}A`}</div>
-              <div className="text-[7px] font-bold mt-[1px]" style={{ color: statuses.T1 && statuses.Bus1 ? '#a6e3a1' : '#f38ba8' }}>{statuses.T1 && statuses.Bus1 ? 'ჩართულია' : 'გათიშულია'}</div>
+            <div ref={nodeRefs.trans1} style={{ position: 'absolute', left: '260px', top: '310px', width: '125px', padding: '4px', borderRadius: '4px', textAlign: 'center', zIndex: 3, border: '1px solid', backgroundColor: statuses.T1 && statuses.Bus1 ? '#1e1e2e' : '#2a171e', borderColor: statuses.T1 && statuses.Bus1 ? '#f9e2af' : '#f38ba8' }}>
+              <div style={{ fontSize: '8px', fontWeight: 'bold' }}>⚡ ტრანსფ. T-1 (110/10კვ)</div>
+              <div style={{ backgroundColor: '#11111b', color: '#fab387', fontFamily: 'monospace', fontSize: '7px', padding: '1px 2px', borderRadius: '2px', marginTop: '1px' }}>SEL-487E</div>
+              <div style={{ fontSize: '7px', fontWeight: 'bold', marginTop: '1px', color: statuses.T1 && statuses.Bus1 ? '#a6e3a1' : '#f38ba8' }}>{statuses.T1 && statuses.Bus1 ? 'ჩართულია' : 'გათიშულია'}</div>
             </div>
 
-            {/* T-2 Block with dynamic LV & HV current readouts */}
-            <div className={`absolute flex flex-col items-center p-[4px] rounded-[4px] text-center z-[3] w-[125px] border ${statuses.T2 && statuses.Bus2 ? 'bg-[#1e1e2e] border-[#f9e2af]' : 'bg-[#2a171e] border-[#f38ba8]'}`} ref={nodeRefs.trans2} style={{ left: '560px', top: '310px' }}>
-              <div className="text-[8px] font-bold text-[#cdd6f4]">⚡ ტრანსფ. T-2 (110/35/6კვ)</div>
-              <div className="bg-[#11111b] text-[#fab387] font-mono text-[7px] px-[2px] py-[1px] rounded mt-[1px]">SEL-487E</div>
-              <div className="text-[7px] font-mono mt-[2px] text-[#89b4fa]">{`110kV: ${t2_110_Current}A`}</div>
-              <div className="text-[7px] font-bold mt-[1px]" style={{ color: statuses.T2 && statuses.Bus2 ? '#a6e3a1' : '#f38ba8' }}>{statuses.T2 && statuses.Bus2 ? 'ჩართულია' : 'გათიშულია'}</div>
+            <div ref={nodeRefs.trans2} style={{ position: 'absolute', left: '560px', top: '310px', width: '125px', padding: '4px', borderRadius: '4px', textAlign: 'center', zIndex: 3, border: '1px solid', backgroundColor: statuses.T2 && statuses.Bus2 ? '#1e1e2e' : '#2a171e', borderColor: statuses.T2 && statuses.Bus2 ? '#f9e2af' : '#f38ba8' }}>
+              <div style={{ fontSize: '8px', fontWeight: 'bold' }}>⚡ ტრანსფ. T-2 (110/35/6კვ)</div>
+              <div style={{ backgroundColor: '#11111b', color: '#fab387', fontFamily: 'monospace', fontSize: '7px', padding: '1px 2px', borderRadius: '2px', marginTop: '1px' }}>SEL-487E</div>
+              <div style={{ fontSize: '7px', fontWeight: 'bold', marginTop: '1px', color: statuses.T2 && statuses.Bus2 ? '#a6e3a1' : '#f38ba8' }}>{statuses.T2 && statuses.Bus2 ? 'ჩართულია' : 'გათიშულია'}</div>
             </div>
 
-            <div className={`absolute flex flex-col items-center p-[4px] rounded-[4px] text-center z-[3] w-[115px] border ${statuses.T1 && statuses.FeederCity ? 'bg-[#1e1e2e] border-[#a6e3a1]' : 'bg-[#2a171e] border-[#f38ba8]'}`} ref={nodeRefs.userB} style={{ left: '175px', top: '450px' }}>
-              <div className="text-[8px] font-bold text-[#cdd6f4]">🏙️ ქალაქის ფიდერი (10 კვ)</div>
-              <div className="bg-[#11111b] text-[#fab387] font-mono text-[7px] px-[2px] py-[1px] rounded mt-[1px]">SEL-351A</div>
-              <div className="text-[7px] font-bold mt-[1px]" style={{ color: statuses.T1 && statuses.FeederCity ? '#a6e3a1' : '#f38ba8' }}>{statuses.T1 && statuses.FeederCity ? 'ჩართულია' : 'გათიშულია'}</div>
+            <div ref={nodeRefs.userB} style={{ position: 'absolute', left: '175px', top: '450px', width: '115px', padding: '4px', borderRadius: '4px', textAlign: 'center', zIndex: 3, border: '1px solid', backgroundColor: statuses.T1 && statuses.FeederCity ? '#1e1e2e' : '#2a171e', borderColor: statuses.T1 && statuses.FeederCity ? '#a6e3a1' : '#f38ba8' }}>
+              <div style={{ fontSize: '8px', fontWeight: 'bold' }}>🏙️ ქალაქის ფიდერი (10 კვ)</div>
+              <div style={{ backgroundColor: '#11111b', color: '#fab387', fontFamily: 'monospace', fontSize: '7px', padding: '1px 2px', borderRadius: '2px', marginTop: '1px' }}>SEL-351A</div>
+              <div style={{ fontSize: '7px', fontWeight: 'bold', marginTop: '1px', color: statuses.T1 && statuses.FeederCity ? '#a6e3a1' : '#f38ba8' }}>{statuses.T1 && statuses.FeederCity ? 'ჩართულია' : 'გათიშულია'}</div>
             </div>
 
-            <div className={`absolute flex flex-col items-center p-[4px] rounded-[4px] text-center z-[3] w-[120px] border ${statuses.T1 && statuses.FeederReg ? 'bg-[#1e1e2e] border-[#a6e3a1]' : 'bg-[#2a171e] border-[#f38ba8]'}`} ref={nodeRefs.userE} style={{ left: '345px', top: '450px' }}>
-              <div className="text-[8px] font-bold text-[#cdd6f4]">📐 რეგიონული ფიდერი (10 კვ)</div>
-              <div className="bg-[#11111b] text-[#fab387] font-mono text-[7px] px-[2px] py-[1px] rounded mt-[1px]">SEL-351S</div>
-              <div className="text-[7px] font-bold mt-[1px]" style={{ color: statuses.T1 && statuses.FeederReg ? '#a6e3a1' : '#f38ba8' }}>{statuses.T1 && statuses.FeederReg ? 'ჩართულია' : 'გათიშულია'}</div>
+            <div ref={nodeRefs.userE} style={{ position: 'absolute', left: '345px', top: '450px', width: '120px', padding: '4px', borderRadius: '4px', textAlign: 'center', zIndex: 3, border: '1px solid', backgroundColor: statuses.T1 && statuses.FeederReg ? '#1e1e2e' : '#2a171e', borderColor: statuses.T1 && statuses.FeederReg ? '#a6e3a1' : '#f38ba8' }}>
+              <div style={{ fontSize: '8px', fontWeight: 'bold' }}>📐 რეგიონული ფიდერი (10 კვ)</div>
+              <div style={{ backgroundColor: '#11111b', color: '#fab387', fontFamily: 'monospace', fontSize: '7px', padding: '1px 2px', borderRadius: '2px', marginTop: '1px' }}>SEL-351S</div>
+              <div style={{ fontSize: '7px', fontWeight: 'bold', marginTop: '1px', color: statuses.T1 && statuses.FeederReg ? '#a6e3a1' : '#f38ba8' }}>{statuses.T1 && statuses.FeederReg ? 'ჩართულია' : 'გათიშულია'}</div>
             </div>
 
-            <div className={`absolute flex flex-col items-center p-[4px] rounded-[4px] text-center z-[3] w-[115px] border ${statuses.T2 && statuses.Feeder35 ? 'bg-[#1e1e2e] border-[#a6e3a1]' : 'bg-[#2a171e] border-[#f38ba8]'}`} ref={nodeRefs.userC} style={{ left: '480px', top: '450px' }}>
-              <div className="text-[8px] font-bold text-[#cdd6f4]">🏭 ქარხნის ხაზი (35 კვ)</div>
-              <div className="bg-[#11111b] text-[#fab387] font-mono text-[7px] px-[2px] py-[1px] rounded mt-[1px]">SEL-421</div>
-              <div className="text-[7px] font-bold mt-[1px]" style={{ color: statuses.T2 && statuses.Feeder35 ? '#a6e3a1' : '#f38ba8' }}>{statuses.T2 && statuses.Feeder35 ? 'ჩართულია' : 'გათიშულია'}</div>
+            <div ref={nodeRefs.userC} style={{ position: 'absolute', left: '480px', top: '450px', width: '115px', padding: '4px', borderRadius: '4px', textAlign: 'center', zIndex: 3, border: '1px solid', backgroundColor: statuses.T2 && statuses.Feeder35 ? '#1e1e2e' : '#2a171e', borderColor: statuses.T2 && statuses.Feeder35 ? '#a6e3a1' : '#f38ba8' }}>
+              <div style={{ fontSize: '8px', fontWeight: 'bold' }}>🏭 ქარხნის ხაზი (35 კვ)</div>
+              <div style={{ backgroundColor: '#11111b', color: '#fab387', fontFamily: 'monospace', fontSize: '7px', padding: '1px 2px', borderRadius: '2px', marginTop: '1px' }}>SEL-421</div>
+              <div style={{ fontSize: '7px', fontWeight: 'bold', marginTop: '1px', color: statuses.T2 && statuses.Feeder35 ? '#a6e3a1' : '#f38ba8' }}>{statuses.T2 && statuses.Feeder35 ? 'ჩართულია' : 'გათიშულია'}</div>
             </div>
 
-            <div className={`absolute flex flex-col items-center p-[4px] rounded-[4px] text-center z-[3] w-[115px] border ${statuses.T2 && statuses.Motor6 ? 'bg-[#1e1e2e] border-[#a6e3a1]' : 'bg-[#2a171e] border-[#f38ba8]'}`} ref={nodeRefs.userD} style={{ left: '650px', top: '450px' }}>
-              <div className="text-[8px] font-bold text-[#cdd6f4]">⚙️ ასინქ. ძრავა (6 კვ)</div>
-              <div className="bg-[#11111b] text-[#fab387] font-mono text-[7px] px-[2px] py-[1px] rounded mt-[1px]">SEL-701</div>
-              <div className="text-[7px] font-bold mt-[1px]" style={{ color: statuses.T2 && statuses.Motor6 ? '#a6e3a1' : '#f38ba8' }}>{statuses.T2 && statuses.Motor6 ? 'ჩართულია' : 'გათიშულია'}</div>
+            <div ref={nodeRefs.userD} style={{ position: 'absolute', left: '650px', top: '450px', width: '115px', padding: '4px', borderRadius: '4px', textAlign: 'center', zIndex: 3, border: '1px solid', backgroundColor: statuses.T2 && statuses.Motor6 ? '#1e1e2e' : '#2a171e', borderColor: statuses.T2 && statuses.Motor6 ? '#a6e3a1' : '#f38ba8' }}>
+              <div style={{ fontSize: '8px', fontWeight: 'bold' }}>⚙️ ასინქ. ძრავა (6 კვ)</div>
+              <div style={{ backgroundColor: '#11111b', color: '#fab387', fontFamily: 'monospace', fontSize: '7px', padding: '1px 2px', borderRadius: '2px', marginTop: '1px' }}>SEL-701</div>
+              <div style={{ fontSize: '7px', fontWeight: 'bold', marginTop: '1px', color: statuses.T2 && statuses.Motor6 ? '#a6e3a1' : '#f38ba8' }}>{statuses.T2 && statuses.Motor6 ? 'ჩართულია' : 'გათიშულია'}</div>
             </div>
 
-            <div className="absolute bottom-[6px] right-[10px] text-[9px] text-[#a6adc8] font-mono opacity-80">
+            <div style={{ position: 'absolute', bottom: '6px', right: '10px', fontSize: '9px', color: '#a6adc8', fontFamily: 'monospace' }}>
               <span>👨‍🔬 ავტორი: ბორის ჯინჭველეიშვილი</span>
             </div>
           </div>
 
-          {/* Fault Simulation Buttons */}
-          <h3 className="mt-[10px] text-[#89b4fa] border-b border-[#313244] pb-[4px] text-[12px] font-bold">💥 ავარიული რეჟიმების იმიტაცია</h3>
-          <div className="grid grid-cols-2 md:grid-cols-3 gap-[5px] mt-[6px]">
-            <button className="bg-[#1e1e2e] border border-[#f38ba8] text-white p-[5px] rounded text-left text-[9px] font-bold cursor-pointer hover:bg-[#f38ba8] hover:text-black transition-colors" onClick={() => triggerFault('at1_diff')}>🌀 AT-1 დიფერენციალური (87AT)</button>
-            <button className="bg-[#1e1e2e] border border-[#f38ba8] text-white p-[5px] rounded text-left text-[9px] font-bold cursor-pointer hover:bg-[#f38ba8] hover:text-black transition-colors" onClick={() => triggerFault('at2_diff')}>🌀 AT-2 დიფერენციალური (87AT)</button>
-            <button className="bg-[#1e1e2e] border border-[#f38ba8] text-white p-[5px] rounded text-left text-[9px] font-bold cursor-pointer hover:bg-[#f38ba8] hover:text-black transition-colors" onClick={() => triggerFault('bus1_fault')}>⚡ 110კვ I სექციის მ.შ. (87B)</button>
-            <button className="bg-[#1e1e2e] border border-[#f38ba8] text-white p-[5px] rounded text-left text-[9px] font-bold cursor-pointer hover:bg-[#f38ba8] hover:text-black transition-colors" onClick={() => triggerFault('bus2_fault')}>⚡ 110კვ II სექციის მ.შ. (87B)</button>
-            <button className="bg-[#1e1e2e] border border-[#f38ba8] text-white p-[5px] rounded text-left text-[9px] font-bold cursor-pointer hover:bg-[#f38ba8] hover:text-black transition-colors" onClick={() => triggerFault('line_a_fault')}>🛣️ 110კვ "მაგისტრალი ა" (21)</button>
-            <button className="bg-[#1e1e2e] border border-[#f38ba8] text-white p-[5px] rounded text-left text-[9px] font-bold cursor-pointer hover:bg-[#f38ba8] hover:text-black transition-colors" onClick={() => triggerFault('t1_fault')}>⚡ ტრანსფორმატორი T-1 (87T)</button>
-            <button className="bg-[#1e1e2e] border border-[#f38ba8] text-white p-[5px] rounded text-left text-[9px] font-bold cursor-pointer hover:bg-[#f38ba8] hover:text-black transition-colors" onClick={() => triggerFault('t2_fault')}>⚡ ტრანსფორმატორი T-2 (87T)</button>
-            <button className="bg-[#1e1e2e] border border-[#f38ba8] text-white p-[5px] rounded text-left text-[9px] font-bold cursor-pointer hover:bg-[#f38ba8] hover:text-black transition-colors" onClick={() => triggerFault('line_35_fault')}>🏭 35კვ ქარხნის ხაზი (21)</button>
-            <button className="bg-[#1e1e2e] border border-[#f38ba8] text-white p-[5px] rounded text-left text-[9px] font-bold cursor-pointer hover:bg-[#f38ba8] hover:text-black transition-colors" onClick={() => triggerFault('feeder_city_fault')}>🏙️ 10კვ საქალაქო ფიდერი (50/51)</button>
-            <button className="bg-[#1e1e2e] border border-[#f38ba8] text-white p-[5px] rounded text-left text-[9px] font-bold cursor-pointer hover:bg-[#f38ba8] hover:text-black transition-colors" onClick={() => triggerFault('feeder_reg_fault')}>📐 10კვ რეგიონული ფიდერი (67N)</button>
-            <button className="bg-[#1e1e2e] border border-[#f38ba8] text-white p-[5px] rounded text-left text-[9px] font-bold cursor-pointer hover:bg-[#f38ba8] hover:text-black transition-colors" onClick={() => triggerFault('motor_fault')}>⚙️ 6კვ ასინქრონული ძრავა (701)</button>
-            <button className="bg-[#1e1e2e] border border-[#f9e2af] text-[#f9e2af] p-[5px] rounded text-left text-[9px] font-bold cursor-pointer hover:bg-[#f9e2af] hover:text-black transition-colors" onClick={() => triggerFault('bus_coupler_fault')}>⏹️ სექციური Q-110 (ყალბი გამორთვა)</button>
+          {/* ავარიის ღილაკები - 2 სვეტიანი ბადე */}
+          <h3 style={{ marginTop: '10px', color: '#89b4fa', borderBottom: '1px solid #313244', paddingBottom: '4px', fontSize: '12px', fontWeight: 'bold' }}>💥 ავარიული რეჟიმების იმიტაცია</h3>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '5px', marginTop: '6px' }}>
+            <button style={{ backgroundColor: '#1e1e2e', border: '1px solid #f38ba8', color: '#fff', padding: '5px', borderRadius: '4px', textAlign: 'left', fontSize: '9px', fontWeight: 'bold', cursor: 'pointer' }} onClick={() => triggerFault('at1_diff')}>🌀 AT-1 დიფერენციალური (87AT)</button>
+            <button style={{ backgroundColor: '#1e1e2e', border: '1px solid #f38ba8', color: '#fff', padding: '5px', borderRadius: '4px', textAlign: 'left', fontSize: '9px', fontWeight: 'bold', cursor: 'pointer' }} onClick={() => triggerFault('at2_diff')}>🌀 AT-2 დიფერენციალური (87AT)</button>
+            <button style={{ backgroundColor: '#1e1e2e', border: '1px solid #f38ba8', color: '#fff', padding: '5px', borderRadius: '4px', textAlign: 'left', fontSize: '9px', fontWeight: 'bold', cursor: 'pointer' }} onClick={() => triggerFault('bus1_fault')}>⚡ 110კვ I სექციის მ.შ. (87B)</button>
+            <button style={{ backgroundColor: '#1e1e2e', border: '1px solid #f38ba8', color: '#fff', padding: '5px', borderRadius: '4px', textAlign: 'left', fontSize: '9px', fontWeight: 'bold', cursor: 'pointer' }} onClick={() => triggerFault('bus2_fault')}>⚡ 110კვ II სექციის მ.შ. (87B)</button>
+            <button style={{ backgroundColor: '#1e1e2e', border: '1px solid #f38ba8', color: '#fff', padding: '5px', borderRadius: '4px', textAlign: 'left', fontSize: '9px', fontWeight: 'bold', cursor: 'pointer' }} onClick={() => triggerFault('line_a_fault')}>🛣️ 110კვ "მაგისტრალი ა" (21)</button>
+            <button style={{ backgroundColor: '#1e1e2e', border: '1px solid #f38ba8', color: '#fff', padding: '5px', borderRadius: '4px', textAlign: 'left', fontSize: '9px', fontWeight: 'bold', cursor: 'pointer' }} onClick={() => triggerFault('t1_fault')}>⚡ ტრანსფორმატორი T-1 (87T)</button>
+            <button style={{ backgroundColor: '#1e1e2e', border: '1px solid #f38ba8', color: '#fff', padding: '5px', borderRadius: '4px', textAlign: 'left', fontSize: '9px', fontWeight: 'bold', cursor: 'pointer' }} onClick={() => triggerFault('t2_fault')}>⚡ ტრანსფორმატორი T-2 (87T)</button>
+            <button style={{ backgroundColor: '#1e1e2e', border: '1px solid #f38ba8', color: '#fff', padding: '5px', borderRadius: '4px', textAlign: 'left', fontSize: '9px', fontWeight: 'bold', cursor: 'pointer' }} onClick={() => triggerFault('line_35_fault')}>🏭 35კვ ქარხნის ხაზი (21)</button>
+            <button style={{ backgroundColor: '#1e1e2e', border: '1px solid #f38ba8', color: '#fff', padding: '5px', borderRadius: '4px', textAlign: 'left', fontSize: '9px', fontWeight: 'bold', cursor: 'pointer' }} onClick={() => triggerFault('feeder_city_fault')}>🏙️ 10კვ საქალაქო ფიდერი (50/51)</button>
+            <button style={{ backgroundColor: '#1e1e2e', border: '1px solid #f38ba8', color: '#fff', padding: '5px', borderRadius: '4px', textAlign: 'left', fontSize: '9px', fontWeight: 'bold', cursor: 'pointer' }} onClick={() => triggerFault('feeder_reg_fault')}>📐 10კვ რეგიონული ფიდერი (67N)</button>
+            <button style={{ backgroundColor: '#1e1e2e', border: '1px solid #f38ba8', color: '#fff', padding: '5px', borderRadius: '4px', textAlign: 'left', fontSize: '9px', fontWeight: 'bold', cursor: 'pointer' }} onClick={() => triggerFault('motor_fault')}>⚙️ 6კვ ასინქრონული ძრავა (701)</button>
+            <button style={{ backgroundColor: '#1e1e2e', border: '1px solid #f9e2af', color: '#f9e2af', padding: '5px', borderRadius: '4px', textAlign: 'left', fontSize: '9px', fontWeight: 'bold', cursor: 'pointer' }} onClick={() => triggerFault('bus_coupler_fault')}>⏹️ სექციური Q-110 (ყალბი გამორთვა)</button>
           </div>
         </div>
 
-        {/* Right Side Panel: SCADA telemetry & Logs */}
-        <div className="bg-[#161622] rounded-[6px] p-[10px] shadow-lg border border-[#313244] flex flex-col gap-3">
+        {/* მარჯვენა პანელი: SCADA ტელემეტრია და ლოგები */}
+        <div style={{ backgroundColor: '#161622', borderRadius: '6px', padding: '10px', border: '1px solid #313244', display: 'flex', flexDirection: 'column', gap: '10px' }}>
           
-          <button className="bg-[#a6e3a1] text-[#11111b] text-[12px] w-full p-[8px] rounded font-bold cursor-pointer hover:bg-[#90d98b] transition-colors flex items-center justify-center gap-1 shadow" onClick={resetSystem}>
+          <button style={{ backgroundColor: '#a6e3a1', color: '#11111b', fontSize: '12px', width: '100%', padding: '8px', borderRadius: '4px', fontWeight: 'bold', cursor: 'pointer', border: 'none' }} onClick={resetSystem}>
             🔄 სისტემის სრული აღდგენა (Reset)
           </button>
 
           {/* SCADA Telemetry Block */}
-          <div className="bg-[#0b0b12] rounded p-[8px] border border-[#313244]">
-            <h3 className="m-0 text-[11px] text-[#89b4fa] font-bold border-b border-[#313244] pb-[4px] mb-[6px] flex items-center justify-between">
-              <span>📡 SCADA ტელემეტრია & ავარიის მონაცემები</span>
-              <span className="text-[9px] px-[4px] py-[1px] rounded bg-[#1e1e2e]" style={{ color: telemetry.modeColor }}>{telemetry.modeVal}</span>
+          <div style={{ backgroundColor: '#0b0b12', borderRadius: '4px', padding: '8px', border: '1px solid #313244' }}>
+            <h3 style={{ margin: 0, fontSize: '11px', color: '#89b4fa', fontWeight: 'bold', borderBottom: '1px solid #313244', paddingBottom: '4px', marginBottom: '6px', display: 'flex', justifyContent: 'space-between' }}>
+              <span>📡 SCADA ტელემეტრია</span>
+              <span style={{ fontSize: '9px', padding: '1px 4px', borderRadius: '2px', backgroundColor: '#1e1e2e', color: telemetry.modeColor }}>{telemetry.modeVal}</span>
             </h3>
 
-            <div className="grid grid-cols-2 gap-x-2 gap-y-1.5 font-mono text-[9px]">
-              <div className="bg-[#161622] p-[4px] rounded border border-[#222330]">
-                <span className="text-[#a6adc8] block">🛡️ აქტიური დაცვა:</span>
-                <span className="text-[#fab387] font-bold">{telemetry.activeProtection}</span>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '6px', fontFamily: 'monospace', fontSize: '9px' }}>
+              <div style={{ backgroundColor: '#161622', padding: '4px', borderRadius: '4px', border: '1px solid #222330' }}>
+                <span style={{ color: '#a6adc8', display: 'block' }}>🛡️ აქტიური დაცვა:</span>
+                <span style={{ color: '#fab387', fontWeight: 'bold' }}>{telemetry.activeProtection}</span>
               </div>
-              <div className="bg-[#161622] p-[4px] rounded border border-[#222330]">
-                <span className="text-[#a6adc8] block">📋 ავარიის ტიპი:</span>
-                <span className="text-[#cdd6f4] font-bold">{telemetry.faultTypeVal}</span>
+              <div style={{ backgroundColor: '#161622', padding: '4px', borderRadius: '4px', border: '1px solid #222330' }}>
+                <span style={{ color: '#a6adc8', display: 'block' }}>📋 ავარიის ტიპი:</span>
+                <span style={{ color: '#cdd6f4', fontWeight: 'bold' }}>{telemetry.faultTypeVal}</span>
               </div>
-              <div className="bg-[#161622] p-[4px] rounded border border-[#222330]">
-                <span className="text-[#a6adc8] block">💥 ავარიის დენი ($I_f$):</span>
-                <span className="text-[#f38ba8] font-bold">{telemetry.faultCurrentVal}</span>
+              <div style={{ backgroundColor: '#161622', padding: '4px', borderRadius: '4px', border: '1px solid #222330' }}>
+                <span style={{ color: '#a6adc8', display: 'block' }}>💥 ავარიის დენი ($I_f$):</span>
+                <span style={{ color: '#f38ba8', fontWeight: 'bold' }}>{telemetry.faultCurrentVal}</span>
               </div>
-              <div className="bg-[#161622] p-[4px] rounded border border-[#222330]">
-                <span className="text-[#a6adc8] block">📉 ავარიული ძაბვა:</span>
-                <span className="text-[#f9e2af] font-bold">{telemetry.faultVoltageVal}</span>
+              <div style={{ backgroundColor: '#161622', padding: '4px', borderRadius: '4px', border: '1px solid #222330' }}>
+                <span style={{ color: '#a6adc8', display: 'block' }}>📉 ავარიული ძაბვა:</span>
+                <span style={{ color: '#f9e2af', fontWeight: 'bold' }}>{telemetry.faultVoltageVal}</span>
               </div>
-              <div className="bg-[#161622] p-[4px] rounded border border-[#222330]">
-                <span className="text-[#a6adc8] block">⏱️ გამორთვის დრო:</span>
-                <span className="text-[#a6e3a1] font-bold">{telemetry.tripTimeVal}</span>
+              <div style={{ backgroundColor: '#161622', padding: '4px', borderRadius: '4px', border: '1px solid #222330' }}>
+                <span style={{ color: '#a6adc8', display: 'block' }}>⏱️ გამორთვის დრო:</span>
+                <span style={{ color: '#a6e3a1', fontWeight: 'bold' }}>{telemetry.tripTimeVal}</span>
               </div>
-              <div className="bg-[#161622] p-[4px] rounded border border-[#222330]">
-                <span className="text-[#a6adc8] block">📍 ავარიის მანძილი:</span>
-                <span className="text-[#89b4fa] font-bold">{telemetry.faultDistanceVal}</span>
+              <div style={{ backgroundColor: '#161622', padding: '4px', borderRadius: '4px', border: '1px solid #222330' }}>
+                <span style={{ color: '#a6adc8', display: 'block' }}>📍 ავარიის მანძილი:</span>
+                <span style={{ color: '#89b4fa', fontWeight: 'bold' }}>{telemetry.faultDistanceVal}</span>
               </div>
-              <div className="bg-[#161622] p-[4px] rounded border border-[#222330]">
-                <span className="text-[#a6adc8] block">🌀 ნულოვანი დენი ($I_0$):</span>
-                <span className="text-[#cdd6f4] font-bold">{telemetry.zeroSeqVal}</span>
+              <div style={{ backgroundColor: '#161622', padding: '4px', borderRadius: '4px', border: '1px solid #222330' }}>
+                <span style={{ color: '#a6adc8', display: 'block' }}>🌀 ნულოვანი დენი ($I_0$):</span>
+                <span style={{ color: '#cdd6f4', fontWeight: 'bold' }}>{telemetry.zeroSeqVal}</span>
               </div>
-              <div className="bg-[#161622] p-[4px] rounded border border-[#222330]">
-                <span className="text-[#a6adc8] block">📁 COMTRADE ჩანაწერი:</span>
-                <span className="text-[#b4befe] font-bold">{telemetry.comtradeVal}</span>
+              <div style={{ backgroundColor: '#161622', padding: '4px', borderRadius: '4px', border: '1px solid #222330' }}>
+                <span style={{ color: '#a6adc8', display: 'block' }}>📁 COMTRADE ჩანაწერი:</span>
+                <span style={{ color: '#b4befe', fontWeight: 'bold' }}>{telemetry.comtradeVal}</span>
               </div>
             </div>
           </div>
 
           {/* Event Log */}
-          <div className="flex-1 flex flex-col bg-[#07070a] rounded p-[8px] border border-[#222330] min-h-[160px]">
-            <div className="flex justify-between items-center mb-[4px]">
-              <h3 className="m-0 text-[11px] text-[#89b4fa] font-bold flex items-center gap-1">
+          <div style={{ flex: 1, display: 'flex', flexDirection: 'column', backgroundColor: '#07070a', borderRadius: '4px', padding: '8px', border: '1px solid #222330', minHeight: '180px' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
+              <h3 style={{ margin: 0, fontSize: '11px', color: '#89b4fa', fontWeight: 'bold' }}>
                 📜 მოვლენათა ჟურნალი
               </h3>
-              <button className="bg-transparent text-white cursor-pointer p-[2px] rounded text-[11px] hover:bg-[#313244]" onClick={clearLogs}>🗑️</button>
+              <button style={{ backgroundColor: 'transparent', color: '#fff', border: 'none', cursor: 'pointer', fontSize: '11px' }} onClick={clearLogs}>🗑️</button>
             </div>
 
-            <div className="flex-1 overflow-y-auto font-mono text-[9px]">
+            <div style={{ flex: 1, overflowY: 'auto', fontFamily: 'monospace', fontSize: '9px' }}>
               {logs.map((log, index) => (
-                <div key={index} className="mb-[3px] leading-[1.3]" style={{ color: log.type === 'success' ? '#a6e3a1' : log.type === 'warn' ? '#f9e2af' : log.type === 'danger' ? '#f38ba8' : '#cdd6f4' }}>
+                <div key={index} style={{ marginBottom: '3px', lineHeight: '1.3', color: log.type === 'success' ? '#a6e3a1' : log.type === 'warn' ? '#f9e2af' : log.type === 'danger' ? '#f38ba8' : '#cdd6f4' }}>
                   <code>[{log.time}] {log.message}</code>
                 </div>
               ))}
