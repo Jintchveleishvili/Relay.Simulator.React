@@ -1,0 +1,57 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --bg-color: #0f0f14;
+  --panel-bg: #161622;
+  --text-color: #cdd6f4;
+  --accent-color: #89b4fa;
+  --success: #a6e3a1;
+  --danger: #f38ba8;
+  --warning: #f9e2af;
+}
+
+body {
+  font-family: 'Segoe UI', sans-serif;
+  background-color: var(--bg-color);
+  color: var(--text-color);
+  margin: 0;
+  padding: 15px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+@keyframes power-flow {
+  to { stroke-dashoffset: -14; }
+}
+
+.flow-line {
+  fill: none;
+  stroke: #2a2b3d;
+  stroke-width: 3;
+  transition: stroke 0.2s;
+}
+
+.flow-line.active {
+  stroke: var(--success);
+  stroke-width: 3.5;
+  stroke-dasharray: 8, 6;
+  animation: power-flow 0.4s infinite linear;
+  filter: drop-shadow(0px 0px 3px var(--success));
+}
+
+.flow-line.fault {
+  stroke: var(--danger);
+  stroke-dasharray: 5, 3;
+  animation: power-flow 0.15s infinite linear;
+  filter: drop-shadow(0px 0px 6px var(--danger));
+}
+
+.flow-line.tripped {
+  stroke: #222330;
+  stroke-dasharray: none;
+  animation: none;
+  filter: none;
+}
