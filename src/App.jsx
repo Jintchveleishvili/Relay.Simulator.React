@@ -29,7 +29,6 @@ export default function App() {
     Motor6: true
   });
 
-  // SCADA ტელემეტრიის საწყისი მდგომარეობა
   const [telemetry, setTelemetry] = useState({
     currentVal: "414 A",
     voltageVal: "110.0 კვ",
@@ -51,25 +50,16 @@ export default function App() {
   const [logs, setLogs] = useState([
     { 
       time: new Date().toLocaleTimeString(), 
-      message: "[SCADA] სისტემა ნორმალურ რეჟიმშია. ყველა დაცვა მზადყოფნაშია.", 
+      message: "[SCADA] სისტემა ნორმალურ რეჟიმშია. ექვივალენტური გენერაცია: 2000 მგვტ.", 
       type: "success" 
     }
   ]);
 
   const nodeRefs = {
-    gen: useRef(null),
-    at1: useRef(null),
-    at2: useRef(null),
-    bus110_1: useRef(null),
-    bus110_2: useRef(null),
-    coupler: useRef(null),
-    trans1: useRef(null),
-    trans2: useRef(null),
-    userA: useRef(null),
-    userB: useRef(null),
-    userE: useRef(null),
-    userC: useRef(null),
-    userD: useRef(null)
+    gen: useRef(null), at1: useRef(null), at2: useRef(null),
+    bus110_1: useRef(null), bus110_2: useRef(null), coupler: useRef(null),
+    trans1: useRef(null), trans2: useRef(null), userA: useRef(null),
+    userB: useRef(null), userE: useRef(null), userC: useRef(null), userD: useRef(null)
   };
 
   const addLog = (message, type = 'info') => {
@@ -87,62 +77,86 @@ export default function App() {
   };
 
   // =========================================================
-  // 2. ზუსტი დინამიკური გაანგარიშება
+  // 2. ექვივალენტური სისტემის წინაღობა და დინამიკური ლოგიკა
   // =========================================================
   const calcResults = useMemo(() => {
-    const lineACurrentVal = (statuses.LineA && statuses.Bus1) 
+    // 2.1 სისტემის ექვივალენტური წინაღობის გაანგარიშება (2000 MW გენერაციით)
+    const P_sys = 2000; // MW
+    const cosPhi = 0.85;
+    const S_sc = P_sys / cosPhi; // ~2352.9 MVA
+    const X_sys_220 = Math.pow(220, 2) / S_sc; // ~20.57 Ohm (220kV მხარეს)
+    const X_sys_110 = X_sys_220 * Math.pow(110 / 220, 2); // ~5.14 Ohm (110kV მხარეს)
+
+    // 2.2 ძაბვის არსებობის (Voltage Availability) შემოწმება სალტეებზე
+    // I სექციას აქვს ძაბვა, თუ AT1 ჩართულია და Bus1 ცოცხალია, ან Coupler ჩართულია და II სექციას აქვს ძაბვა
+    const hasVoltageBus1 = statuses.Bus1 && (statuses.AT1 || (statuses.Coupler && statuses.AT2 && statuses.Bus2));
+    
+    // II სექციას აქვს ძაბვა, თუ AT2 ჩართულია და Bus2 ცოცხალია, ან Coupler ჩართულია და I სექციას აქვს ძაბვა
+    const hasVoltageBus2 = statuses.Bus2 && (statuses.AT2 || (statuses.Coupler && statuses.AT1 && statuses.Bus1));
+
+    // 2.3 დატვირთვის დენები (თუ ძაბვა არ არის, დენი = 0)
+    const lineACurrentVal = (statuses.LineA && hasVoltageBus1) 
       ? Math.round(300 * (systemSettings.lineLength / 50)) 
       : 0;
 
-    const t1_10_city = (statuses.T1 && statuses.Bus1 && statuses.FeederCity) 
+    const t1_10_city = (statuses.T1 && hasVoltageBus1 && statuses.FeederCity) 
       ? Math.round(250 * (systemSettings.t1Nominal / 63) * (8 / (systemSettings.lineLength10 || 1))) 
       : 0;
 
-    const t1_10_reg = (statuses.T1 && statuses.Bus1 && statuses.FeederReg) 
+    const t1_10_reg = (statuses.T1 && hasVoltageBus1 && statuses.FeederReg) 
       ? Math.round(150 * (systemSettings.t1Nominal / 63) * (12 / (systemSettings.lineLengthRegional10 || 1))) 
       : 0;
 
-    const t2_35_factory = (statuses.T2 && statuses.Bus2 && statuses.Feeder35) 
+    const t2_35_factory = (statuses.T2 && hasVoltageBus2 && statuses.Feeder35) 
       ? Math.round(200 * (systemSettings.t2Nominal / 40) * (15 / (systemSettings.lineLength35 || 1))) 
       : 0;
 
-    const t2_6_motor = (statuses.T2 && statuses.Bus2 && statuses.Motor6) 
+    const t2_6_motor = (statuses.T2 && hasVoltageBus2 && statuses.Motor6) 
       ? Math.round(160 * (systemSettings.t2Nominal / 40)) 
       : 0;
 
     const t1_LV_TotalCurrent = t1_10_city + t1_10_reg; 
 
-    const t1_110_Current = (statuses.T1 && statuses.Bus1) 
+    const t1_110_Current = (statuses.T1 && hasVoltageBus1) 
       ? Math.round(t1_LV_TotalCurrent * (10 / 110)) 
       : 0;
 
-    const t2_110_Current = (statuses.T2 && statuses.Bus2) 
+    const t2_110_Current = (statuses.T2 && hasVoltageBus2) 
       ? Math.round(t2_35_factory * (35 / 110) + t2_6_motor * (6 / 110)) 
       : 0;
 
-    const total110Load = lineACurrentVal + t1_110_Current + t2_110_Current;
+    // ჯამური დატვირთვები
+    const loadBus1 = lineACurrentVal + t1_110_Current;
+    const loadBus2 = t2_110_Current;
 
     let at1_110_Current = 0;
     let at2_110_Current = 0;
 
-    if (statuses.AT1 && statuses.AT2) {
-      const totalATMVA = systemSettings.at1Nominal + systemSettings.at2Nominal;
-      const at1Ratio = totalATMVA > 0 ? systemSettings.at1Nominal / totalATMVA : 0.5;
-      const at2Ratio = totalATMVA > 0 ? systemSettings.at2Nominal / totalATMVA : 0.5;
-      at1_110_Current = Math.round(total110Load * at1Ratio);
-      at2_110_Current = Math.round(total110Load * at2Ratio);
-    } else if (statuses.AT1 && !statuses.AT2) {
-      at1_110_Current = total110Load;
+    if (statuses.AT1 && statuses.AT2 && statuses.Bus1 && statuses.Bus2) {
+      if (statuses.Coupler) {
+        const totalLoad = loadBus1 + loadBus2;
+        const totalAT = systemSettings.at1Nominal + systemSettings.at2Nominal;
+        at1_110_Current = Math.round(totalLoad * (systemSettings.at1Nominal / totalAT));
+        at2_110_Current = Math.round(totalLoad * (systemSettings.at2Nominal / totalAT));
+      } else {
+        at1_110_Current = loadBus1;
+        at2_110_Current = loadBus2;
+      }
+    } else if (statuses.AT1 && statuses.Bus1) {
+      at1_110_Current = loadBus1 + (statuses.Coupler && statuses.Bus2 ? loadBus2 : 0);
       at2_110_Current = 0;
-    } else if (!statuses.AT1 && statuses.AT2) {
+    } else if (statuses.AT2 && statuses.Bus2) {
       at1_110_Current = 0;
-      at2_110_Current = total110Load;
+      at2_110_Current = loadBus2 + (statuses.Coupler && statuses.Bus1 ? loadBus1 : 0);
     }
 
     const at1_220_Current = Math.round(at1_110_Current * (110 / 220));
     const at2_220_Current = Math.round(at2_110_Current * (110 / 220));
 
     return {
+      X_sys_110,
+      hasVoltageBus1,
+      hasVoltageBus2,
       lineACurrentVal,
       t1_10_city,
       t1_10_reg,
@@ -159,27 +173,32 @@ export default function App() {
   }, [systemSettings, statuses]);
 
   const {
+    X_sys_110, hasVoltageBus1, hasVoltageBus2,
     lineACurrentVal, t1_10_city, t1_10_reg, t2_35_factory, t2_6_motor,
     t1_LV_TotalCurrent, t1_110_Current, t2_110_Current,
     at1_110_Current, at2_110_Current, at1_220_Current, at2_220_Current
   } = calcResults;
 
   const recalculateSystem = () => {
-    addLog(`⚙️ გადაანგარიშება: AT-1 (220kV/110kV) = ${at1_220_Current}A / ${at1_110_Current}A, T-1 (110kV) = ${t1_110_Current}A.`, 'success');
+    addLog(`⚙️ გადაანგარიშება: X_sys(110kV) = ${X_sys_110.toFixed(2)} Ohm (2000MW გენერაციით).`, 'success');
   };
 
   // =========================================================
-  // 3. ავარიული რეჟიმების იმიტაცია და SCADA განახლება
+  // 3. ავარიული რეჟიმები (ზუსტი მ.შ. დენით X_sys-ის გათვალისწინებით)
   // =========================================================
   const triggerFault = (faultType) => {
     let nodeKey = null;
     let faultData = {};
 
+    // 110kV სექციაზე მოკლე შერთვის დენი სისტემის წინაღობის გათვალისწინებით:
+    // I_sc = U_ph / X_sys = (110000 / sqrt(3)) / 5.14 ≈ 12,350 A
+    const ik_110 = Math.round((110000 / Math.sqrt(3)) / X_sys_110); 
+
     switch(faultType) {
       case 'at1_diff':
         nodeKey = 'at1';
         faultData = {
-          relay: "SEL-487E (87AT)", fCurrent: "14,500 A", fVoltage: "18.5 კვ", preCurrent: `${at1_110_Current} A`,
+          relay: "SEL-487E (87AT)", fCurrent: `${Math.round(ik_110 * 1.1)} A`, fVoltage: "18.5 კვ", preCurrent: `${at1_110_Current} A`,
           time: "0.03 წმ", dist: "-", zeroSeq: "0 A", type: "87AT დიფერენციალური", mode: "AT-1 ავარია",
           logMsg: "🚨 [87AT] AT-1 შიდა მოკლე შერთვა! AT-1 გათიშულია.", statusUpdate: { AT1: false }
         };
@@ -187,7 +206,7 @@ export default function App() {
       case 'at2_diff':
         nodeKey = 'at2';
         faultData = {
-          relay: "SEL-487E (87AT)", fCurrent: "14,200 A", fVoltage: "19.1 კვ", preCurrent: `${at2_110_Current} A`,
+          relay: "SEL-487E (87AT)", fCurrent: `${Math.round(ik_110 * 1.08)} A`, fVoltage: "19.1 კვ", preCurrent: `${at2_110_Current} A`,
           time: "0.03 წმ", dist: "-", zeroSeq: "0 A", type: "87AT დიფერენციალური", mode: "AT-2 ავარია",
           logMsg: "🚨 [87AT] AT-2 შიდა მოკლე შერთვა! AT-2 გათიშულია.", statusUpdate: { AT2: false }
         };
@@ -195,23 +214,23 @@ export default function App() {
       case 'bus1_fault':
         nodeKey = 'bus110_1';
         faultData = {
-          relay: "SEL-487B (87B)", fCurrent: "24,500 A", fVoltage: "0.0 კვ", preCurrent: `${at1_110_Current} A`,
+          relay: "SEL-487B (87B)", fCurrent: `${ik_110} A`, fVoltage: "0.0 კვ", preCurrent: `${at1_110_Current} A`,
           time: "0.015 წმ", dist: "-", zeroSeq: "0 A", type: "87B შინების დიფერენციალური", mode: "110კვ I სექციის მ.შ.",
-          logMsg: "🚨 [87B] 110კვ I სექციის მოკლე შერთვა! Q-110 და AT-1 გაითიშა.", statusUpdate: { Bus1: false, Coupler: false, AT1: false, LineA: false, T1: false }
+          logMsg: "🚨 [87B] 110კვ I სექციის მოკლე შერთვა! Q-110 და AT-1 გაითიშა.", statusUpdate: { Bus1: false, Coupler: false, AT1: false }
         };
         break;
       case 'bus2_fault':
         nodeKey = 'bus110_2';
         faultData = {
-          relay: "SEL-487B (87B)", fCurrent: "23,800 A", fVoltage: "0.0 კვ", preCurrent: `${at2_110_Current} A`,
+          relay: "SEL-487B (87B)", fCurrent: `${ik_110} A`, fVoltage: "0.0 კვ", preCurrent: `${at2_110_Current} A`,
           time: "0.015 წმ", dist: "-", zeroSeq: "0 A", type: "87B შინების დიფერენციალური", mode: "110კვ II სექციის მ.შ.",
-          logMsg: "🚨 [87B] 110კვ II სექციის მოკლე შერთვა! Q-110 და AT-2 გაითიშა.", statusUpdate: { Bus2: false, Coupler: false, AT2: false, T2: false }
+          logMsg: "🚨 [87B] 110კვ II სექციის მოკლე შერთვა! Q-110 და AT-2 გაითიშა.", statusUpdate: { Bus2: false, Coupler: false, AT2: false }
         };
         break;
       case 'line_a_fault':
         nodeKey = 'userA';
         faultData = {
-          relay: "SEL-311L (21/87L)", fCurrent: "11,800 A", fVoltage: "32.0 კვ", preCurrent: `${lineACurrentVal} A`,
+          relay: "SEL-311L (21/87L)", fCurrent: `${Math.round(ik_110 * 0.7)} A`, fVoltage: "32.0 კვ", preCurrent: `${lineACurrentVal} A`,
           time: "0.025 წმ", dist: `${(systemSettings.lineLength * 0.35).toFixed(1)} კმ`, zeroSeq: "120 A", type: "21 დისტანციური დაცვა", mode: "110კვ ეგხ ავარია",
           logMsg: "🚨 [21] 110კვ ეგხ მაგისტრალის მოკლე შერთვა! ხაზი გათიშულია.", statusUpdate: { LineA: false }
         };
@@ -219,7 +238,7 @@ export default function App() {
       case 't1_fault':
         nodeKey = 'trans1';
         faultData = {
-          relay: "SEL-487E (87T)", fCurrent: "5,400 A", fVoltage: "12.0 კვ", preCurrent: `${t1_110_Current} A`,
+          relay: "SEL-487E (87T)", fCurrent: `${Math.round(ik_110 * 0.45)} A`, fVoltage: "12.0 კვ", preCurrent: `${t1_110_Current} A`,
           time: "0.03 წმ", dist: "-", zeroSeq: "0 A", type: "87T დიფერენციალური", mode: "T-1 ტრანსფ. ავარია",
           logMsg: "🚨 [87T] ტრანსფორმატორ T-1-ის შიდა ავარია! T-1 გაითიშა.", statusUpdate: { T1: false }
         };
@@ -227,7 +246,7 @@ export default function App() {
       case 't2_fault':
         nodeKey = 'trans2';
         faultData = {
-          relay: "SEL-487E (87T)", fCurrent: "4,900 A", fVoltage: "15.0 კვ", preCurrent: `${t2_110_Current} A`,
+          relay: "SEL-487E (87T)", fCurrent: `${Math.round(ik_110 * 0.42)} A`, fVoltage: "15.0 კვ", preCurrent: `${t2_110_Current} A`,
           time: "0.03 წმ", dist: "-", zeroSeq: "0 A", type: "87T დიფერენციალური", mode: "T-2 ტრანსფ. ავარია",
           logMsg: "🚨 [87T] ტრანსფორმატორ T-2-ის შიდა ავარია! T-2 გაითიშა.", statusUpdate: { T2: false }
         };
@@ -268,7 +287,7 @@ export default function App() {
         nodeKey = 'coupler';
         faultData = {
           relay: "SEL-451", fCurrent: "0 A", fVoltage: "-", preCurrent: "0 A",
-          time: "0.01 წმ", dist: "-", zeroSeq: "0 A", type: "ყალბი გამორთვა (Spurious)", mode: "Q-110 ყალბი გამორთვა",
+          time: "0.01 წმ", dist: "-", zeroSeq: "0 A", type: "ყალბი გამორთვა", mode: "Q-110 ყალბი გამორთვა",
           logMsg: "⚠️ [FALSE TRIP] სექციური ამომრთველის Q-110 ყალბი გამორთვა!", statusUpdate: { Coupler: false }
         };
         break;
@@ -286,12 +305,16 @@ export default function App() {
       });
     }
 
+    // შევამოწმოთ, ხომ არ იწვევს ეს ავარია სრულ ბლექაუტს
+    const nextStatuses = { ...statuses, ...faultData.statusUpdate };
+    const isBlackout = (!nextStatuses.AT1 && !nextStatuses.AT2) || (!nextStatuses.Bus1 && !nextStatuses.Bus2);
+
     setTelemetry({
       currentVal: faultData.fCurrent,
-      voltageVal: faultData.fVoltage,
+      voltageVal: isBlackout ? "0.0 კვ" : faultData.fVoltage,
       preFaultCurrentVal: faultData.preCurrent,
-      modeVal: faultData.mode,
-      modeColor: faultType === 'bus_coupler_fault' ? "#f9e2af" : "#f38ba8",
+      modeVal: isBlackout ? "🚨 სრული ბლექაუტი (BLACKOUT)" : faultData.mode,
+      modeColor: isBlackout ? "#f38ba8" : (faultType === 'bus_coupler_fault' ? "#f9e2af" : "#f38ba8"),
       activeProtection: faultData.relay,
       faultCurrentVal: faultData.fCurrent,
       faultVoltageVal: faultData.fVoltage,
@@ -304,9 +327,13 @@ export default function App() {
 
     addLog(faultData.logMsg, faultType === 'bus_coupler_fault' ? 'warn' : 'danger');
 
+    if (isBlackout) {
+      addLog("❌ [BLACKOUT] ქვესადგურს კვება სრულად შეუნყდა! 110კვ, 35კვ, 10კვ და 6კვ ხაზები ძაბვის გარეშეა.", 'danger');
+    }
+
     setTimeout(() => {
       setSparkPos(prev => ({ ...prev, show: false }));
-      setStatuses(prev => ({ ...prev, ...faultData.statusUpdate }));
+      setStatuses(nextStatuses);
     }, 300);
   };
 
@@ -328,7 +355,6 @@ export default function App() {
   return (
     <div className="w-screen min-h-screen bg-[#0f0f14] p-3 flex flex-col box-border m-0 overflow-x-hidden font-sans text-[#cdd6f4]">
       
-      {/* SVG ხაზების ანიმაციის სტილები */}
       <style>{`
         .flow-line {
           fill: none;
@@ -350,12 +376,12 @@ export default function App() {
         }
       `}</style>
 
-      {/* სათაური */}
+      {/* Header */}
       <h1 className="text-[#89b4fa] text-[18px] mb-[10px] font-bold text-center flex items-center justify-center gap-2">
         <span>⚡</span> SEL რელეების კვანძური ქვესადგურის ინტელექტუალური მოდელი
       </h1>
 
-      {/* Control Panel (2x4 Grid) */}
+      {/* Control Panel */}
       <div className="bg-[#161622] p-[12px] rounded-[6px] mb-[10px] border border-[#313244] shadow-md flex flex-col gap-3">
         <div className="grid grid-cols-1 md:grid-cols-4 gap-x-6 gap-y-3 items-center">
           <div className="flex items-center justify-between gap-2">
@@ -368,7 +394,7 @@ export default function App() {
           </div>
           <div className="flex items-center justify-between gap-2">
             <label className="text-[#cdd6f4] text-[11px] whitespace-nowrap">⚡ T-2 სიმძლავრე (MVA):</label>
-            <input type="number" name="t2Nominal" value={systemSettings.t2Nominal} onChange={handleInputChange} className="w-[70px] bg-[#1e1e2e] text-[#45475a] border border-[#45475a] p-[3px_6px] rounded text-center text-[11px]" />
+            <input type="number" name="t2Nominal" value={systemSettings.t2Nominal} onChange={handleInputChange} className="w-[70px] bg-[#1e1e2e] text-[#cdd6f4] border border-[#45475a] p-[3px_6px] rounded text-center text-[11px]" />
           </div>
           <div className="flex items-center justify-between gap-2">
             <label className="text-[#cdd6f4] text-[11px] whitespace-nowrap">🏙️ 10კვ საქალაქო (კმ):</label>
@@ -392,7 +418,8 @@ export default function App() {
             <input type="number" name="lineLengthRegional10" value={systemSettings.lineLengthRegional10} onChange={handleInputChange} className="w-[70px] bg-[#1e1e2e] text-[#cdd6f4] border border-[#45475a] p-[3px_6px] rounded text-center text-[11px]" />
           </div>
         </div>
-        <div className="flex justify-end mt-1">
+        <div className="flex justify-between items-center mt-1">
+          <span className="text-[10px] font-mono text-[#a6adc8]">🌐 ექვივალენტური გენერაცია: <b>2000 MW</b> | X_sys(110kV) = <b>{X_sys_110.toFixed(2)} Ω</b></span>
           <button 
             onClick={recalculateSystem} 
             className="cursor-pointer bg-[#89b4fa] text-[#11111b] border-none px-6 py-1.5 rounded-[4px] font-bold text-[11px] hover:bg-[#74c7ec] transition-colors flex items-center gap-1 shadow"
@@ -413,7 +440,6 @@ export default function App() {
           
           <div className="bg-[#07070a] border border-[#313244] rounded-[6px] h-[500px] relative overflow-hidden mt-[8px]" ref={gridRef}>
             
-            {/* viewBox-ით SVG სრულად პროპორციული და დინამიკურია ეკრანის ზომის მიუხედავად */}
             <svg viewBox="0 0 1000 500" preserveAspectRatio="none" className="absolute top-0 left-0 w-full h-full pointer-events-none z-[1]">
               <defs>
                 <marker id="arrow-green" viewBox="0 0 10 10" refX="6" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
@@ -424,39 +450,39 @@ export default function App() {
                 </marker>
               </defs>
 
-              {/* AT Flows (AT2 გადატანილია II სექციაზე: X = 750) */}
+              {/* AT Flows */}
               <path className={statuses.AT1 ? "flow-line active" : "flow-line tripped"} d="M 250 32 L 250 105" markerEnd={statuses.AT1 ? "url(#arrow-green)" : "url(#arrow-red)"} />
-              <path className={statuses.AT1 && statuses.Bus1 ? "flow-line active" : "flow-line tripped"} d="M 250 165 L 250 220" markerEnd={statuses.AT1 && statuses.Bus1 ? "url(#arrow-green)" : "url(#arrow-red)"} />
+              <path className={statuses.AT1 && hasVoltageBus1 ? "flow-line active" : "flow-line tripped"} d="M 250 165 L 250 220" markerEnd={statuses.AT1 && hasVoltageBus1 ? "url(#arrow-green)" : "url(#arrow-red)"} />
               
               <path className={statuses.AT2 ? "flow-line active" : "flow-line tripped"} d="M 750 32 L 750 105" markerEnd={statuses.AT2 ? "url(#arrow-green)" : "url(#arrow-red)"} />
-              <path className={statuses.AT2 && statuses.Bus2 ? "flow-line active" : "flow-line tripped"} d="M 750 165 L 750 220" markerEnd={statuses.AT2 && statuses.Bus2 ? "url(#arrow-green)" : "url(#arrow-red)"} />
+              <path className={statuses.AT2 && hasVoltageBus2 ? "flow-line active" : "flow-line tripped"} d="M 750 165 L 750 220" markerEnd={statuses.AT2 && hasVoltageBus2 ? "url(#arrow-green)" : "url(#arrow-red)"} />
 
               {/* Coupler Flow */}
-              <path className={statuses.Coupler ? "flow-line active" : "flow-line tripped"} d="M 430 220 L 500 205 L 570 220" />
+              <path className={statuses.Coupler && (hasVoltageBus1 || hasVoltageBus2) ? "flow-line active" : "flow-line tripped"} d="M 430 220 L 500 205 L 570 220" />
               
-              {/* Feeder Flows (T2: X = 750, 35kV: X = 670, Motor: X = 830) */}
-              <path className={statuses.LineA && statuses.Bus1 ? "flow-line active" : "flow-line tripped"} d="M 150 220 L 150 310" markerEnd={statuses.LineA && statuses.Bus1 ? "url(#arrow-green)" : "url(#arrow-red)"} />
-              <path className={statuses.T1 && statuses.Bus1 ? "flow-line active" : "flow-line tripped"} d="M 320 220 L 320 310" markerEnd={statuses.T1 && statuses.Bus1 ? "url(#arrow-green)" : "url(#arrow-red)"} />
-              <path className={statuses.T2 && statuses.Bus2 ? "flow-line active" : "flow-line tripped"} d="M 750 220 L 750 310" markerEnd={statuses.T2 && statuses.Bus2 ? "url(#arrow-green)" : "url(#arrow-red)"} />
+              {/* Feeder Flows */}
+              <path className={statuses.LineA && hasVoltageBus1 ? "flow-line active" : "flow-line tripped"} d="M 150 220 L 150 310" markerEnd={statuses.LineA && hasVoltageBus1 ? "url(#arrow-green)" : "url(#arrow-red)"} />
+              <path className={statuses.T1 && hasVoltageBus1 ? "flow-line active" : "flow-line tripped"} d="M 320 220 L 320 310" markerEnd={statuses.T1 && hasVoltageBus1 ? "url(#arrow-green)" : "url(#arrow-red)"} />
+              <path className={statuses.T2 && hasVoltageBus2 ? "flow-line active" : "flow-line tripped"} d="M 750 220 L 750 310" markerEnd={statuses.T2 && hasVoltageBus2 ? "url(#arrow-green)" : "url(#arrow-red)"} />
               
-              <path className={statuses.T1 && statuses.FeederCity ? "flow-line active" : "flow-line tripped"} d="M 320 385 L 230 450" markerEnd={statuses.T1 && statuses.FeederCity ? "url(#arrow-green)" : "url(#arrow-red)"} />
-              <path className={statuses.T1 && statuses.FeederReg ? "flow-line active" : "flow-line tripped"} d="M 320 385 L 410 450" markerEnd={statuses.T1 && statuses.FeederReg ? "url(#arrow-green)" : "url(#arrow-red)"} />
-              <path className={statuses.T2 && statuses.Feeder35 ? "flow-line active" : "flow-line tripped"} d="M 750 385 L 670 450" markerEnd={statuses.T2 && statuses.Feeder35 ? "url(#arrow-green)" : "url(#arrow-red)"} />
-              <path className={statuses.T2 && statuses.Motor6 ? "flow-line active" : "flow-line tripped"} d="M 750 385 L 830 450" markerEnd={statuses.T2 && statuses.Motor6 ? "url(#arrow-green)" : "url(#arrow-red)"} />
+              <path className={statuses.T1 && hasVoltageBus1 && statuses.FeederCity ? "flow-line active" : "flow-line tripped"} d="M 320 385 L 230 450" markerEnd={statuses.T1 && hasVoltageBus1 && statuses.FeederCity ? "url(#arrow-green)" : "url(#arrow-red)"} />
+              <path className={statuses.T1 && hasVoltageBus1 && statuses.FeederReg ? "flow-line active" : "flow-line tripped"} d="M 320 385 L 410 450" markerEnd={statuses.T1 && hasVoltageBus1 && statuses.FeederReg ? "url(#arrow-green)" : "url(#arrow-red)"} />
+              <path className={statuses.T2 && hasVoltageBus2 && statuses.Feeder35 ? "flow-line active" : "flow-line tripped"} d="M 750 385 L 670 450" markerEnd={statuses.T2 && hasVoltageBus2 && statuses.Feeder35 ? "url(#arrow-green)" : "url(#arrow-red)"} />
+              <path className={statuses.T2 && hasVoltageBus2 && statuses.Motor6 ? "flow-line active" : "flow-line tripped"} d="M 750 385 L 830 450" markerEnd={statuses.T2 && hasVoltageBus2 && statuses.Motor6 ? "url(#arrow-green)" : "url(#arrow-red)"} />
               
               {/* დენების წარწერები */}
               <text x="180" y="80" fill={statuses.AT1 ? "#a6e3a1" : "#f38ba8"} fontSize="11px" fontFamily="monospace" fontWeight="bold">{`⬇ 220kV: ${at1_220_Current} A`}</text>
               <text x="680" y="80" fill={statuses.AT2 ? "#a6e3a1" : "#f38ba8"} fontSize="11px" fontFamily="monospace" fontWeight="bold">{`⬇ 220kV: ${at2_220_Current} A`}</text>
-              <text x="260" y="195" fill={statuses.AT1 && statuses.Bus1 ? "#a6e3a1" : "#f38ba8"} fontSize="11px" fontFamily="monospace" fontWeight="bold">{`⬇ 110kV: ${at1_110_Current} A`}</text>
-              <text x="760" y="195" fill={statuses.AT2 && statuses.Bus2 ? "#a6e3a1" : "#f38ba8"} fontSize="11px" fontFamily="monospace" fontWeight="bold">{`⬇ 110kV: ${at2_110_Current} A`}</text>
-              <text x="120" y="275" fill={statuses.LineA && statuses.Bus1 ? "#a6e3a1" : "#f38ba8"} fontSize="11px" fontFamily="monospace" fontWeight="bold">{`⬇ ${lineACurrentVal} A`}</text>
+              <text x="260" y="195" fill={statuses.AT1 && hasVoltageBus1 ? "#a6e3a1" : "#f38ba8"} fontSize="11px" fontFamily="monospace" fontWeight="bold">{`⬇ 110kV: ${at1_110_Current} A`}</text>
+              <text x="760" y="195" fill={statuses.AT2 && hasVoltageBus2 ? "#a6e3a1" : "#f38ba8"} fontSize="11px" fontFamily="monospace" fontWeight="bold">{`⬇ 110kV: ${at2_110_Current} A`}</text>
+              <text x="120" y="275" fill={statuses.LineA && hasVoltageBus1 ? "#a6e3a1" : "#f38ba8"} fontSize="11px" fontFamily="monospace" fontWeight="bold">{`⬇ ${lineACurrentVal} A`}</text>
               
-              <text x="330" y="275" fill={statuses.T1 && statuses.Bus1 ? "#a6e3a1" : "#f38ba8"} fontSize="11px" fontFamily="monospace" fontWeight="bold">{`⬇ ${t1_110_Current} A (110kV)`}</text>
-              <text x="760" y="275" fill={statuses.T2 && statuses.Bus2 ? "#a6e3a1" : "#f38ba8"} fontSize="11px" fontFamily="monospace" fontWeight="bold">{`⬇ ${t2_110_Current} A (110kV)`}</text>
-              <text x="180" y="425" fill={statuses.T1 && statuses.FeederCity ? "#a6e3a1" : "#f38ba8"} fontSize="11px" fontFamily="monospace" fontWeight="bold">{`⬇ ${t1_10_city} A`}</text>
-              <text x="370" y="425" fill={statuses.T1 && statuses.FeederReg ? "#a6e3a1" : "#f38ba8"} fontSize="11px" fontFamily="monospace" fontWeight="bold">{`⬇ ${t1_10_reg} A`}</text>
-              <text x="630" y="425" fill={statuses.T2 && statuses.Feeder35 ? "#a6e3a1" : "#f38ba8"} fontSize="11px" fontFamily="monospace" fontWeight="bold">{`⬇ ${t2_35_factory} A`}</text>
-              <text x="800" y="425" fill={statuses.T2 && statuses.Motor6 ? "#a6e3a1" : "#f38ba8"} fontSize="11px" fontFamily="monospace" fontWeight="bold">{`⬇ ${t2_6_motor} A`}</text>
+              <text x="330" y="275" fill={statuses.T1 && hasVoltageBus1 ? "#a6e3a1" : "#f38ba8"} fontSize="11px" fontFamily="monospace" fontWeight="bold">{`⬇ ${t1_110_Current} A`}</text>
+              <text x="760" y="275" fill={statuses.T2 && hasVoltageBus2 ? "#a6e3a1" : "#f38ba8"} fontSize="11px" fontFamily="monospace" fontWeight="bold">{`⬇ ${t2_110_Current} A`}</text>
+              <text x="180" y="425" fill={statuses.T1 && hasVoltageBus1 && statuses.FeederCity ? "#a6e3a1" : "#f38ba8"} fontSize="11px" fontFamily="monospace" fontWeight="bold">{`⬇ ${t1_10_city} A`}</text>
+              <text x="370" y="425" fill={statuses.T1 && hasVoltageBus1 && statuses.FeederReg ? "#a6e3a1" : "#f38ba8"} fontSize="11px" fontFamily="monospace" fontWeight="bold">{`⬇ ${t1_10_reg} A`}</text>
+              <text x="630" y="425" fill={statuses.T2 && hasVoltageBus2 && statuses.Feeder35 ? "#a6e3a1" : "#f38ba8"} fontSize="11px" fontFamily="monospace" fontWeight="bold">{`⬇ ${t2_35_factory} A`}</text>
+              <text x="800" y="425" fill={statuses.T2 && hasVoltageBus2 && statuses.Motor6 ? "#a6e3a1" : "#f38ba8"} fontSize="11px" fontFamily="monospace" fontWeight="bold">{`⬇ ${t2_6_motor} A`}</text>
             </svg>
 
             {sparkPos.show && (
@@ -465,10 +491,10 @@ export default function App() {
 
             {/* 220kV Bus */}
             <div className="absolute bg-[#fab387] h-[6px] rounded-[3px] z-[2] top-[26px] left-[10%] w-[80%]" ref={nodeRefs.gen}>
-              <span className="absolute -top-[16px] left-[10px] text-[10px] font-bold text-[#cdd6f4]">220 კვ სისტემური სალტე</span>
+              <span className="absolute -top-[16px] left-[10px] text-[10px] font-bold text-[#cdd6f4]">220 კვ სისტემური სალტე (S_sc = 2353 MVA)</span>
             </div>
 
-            {/* AT-1 & AT-2 (პროცენტული განლაგება: AT-1 = 25%, AT-2 = 75%) */}
+            {/* AT-1 & AT-2 */}
             <div className={`absolute flex flex-col items-center p-[4px] rounded-[4px] text-center z-[3] w-[130px] -translate-x-1/2 border ${statuses.AT1 ? 'bg-[#1e1e2e] border-[#fab387]' : 'bg-[#2a171e] border-[#f38ba8]'}`} ref={nodeRefs.at1} style={{ left: '25%', top: '105px' }}>
               <div className="text-[9px] font-bold text-[#cdd6f4]">AT-1 (220/110 კვ)</div>
               <div className="bg-[#11111b] text-[#fab387] font-mono text-[8px] px-[3px] py-[1px] rounded mt-[2px] border border-[#313244]">SEL-487E</div>
@@ -481,9 +507,9 @@ export default function App() {
               <div className="text-[7px] font-bold mt-[1px]" style={{ color: statuses.AT2 ? '#a6e3a1' : '#f38ba8' }}>{statuses.AT2 ? 'ჩართულია' : 'გათიშულია (0A)'}</div>
             </div>
 
-            {/* 110kV Bus Sections (I სექცია: 8%-43%, II სექცია: 57%-92%) */}
-            <div className={`absolute h-[6px] rounded-[3px] z-[2] left-[8%] top-[220px] w-[35%] ${statuses.Bus1 ? 'bg-[#89b4fa]' : 'bg-[#f38ba8]'}`} ref={nodeRefs.bus110_1}>
-              <span className="absolute -top-[16px] left-[5px] text-[9px] font-bold text-[#cdd6f4]">110 კვ სალტე - I სექცია</span>
+            {/* 110kV Bus Sections */}
+            <div className={`absolute h-[6px] rounded-[3px] z-[2] left-[8%] top-[220px] w-[35%] ${hasVoltageBus1 ? 'bg-[#89b4fa]' : 'bg-[#f38ba8]'}`} ref={nodeRefs.bus110_1}>
+              <span className="absolute -top-[16px] left-[5px] text-[9px] font-bold text-[#cdd6f4]">110 კვ სალტე - I {hasVoltageBus1 ? '(ძაბვით)' : '(უძაბვოდ)'}</span>
             </div>
 
             <div className={`absolute flex flex-col items-center p-[3px_6px] rounded-[4px] text-center z-[3] w-[110px] -translate-x-1/2 border ${statuses.Coupler ? 'bg-[#242535] border-[#89b4fa]' : 'bg-[#2a171e] border-[#f38ba8]'}`} ref={nodeRefs.coupler} style={{ left: '50%', top: '198px' }}>
@@ -494,53 +520,53 @@ export default function App() {
               </div>
             </div>
 
-            <div className={`absolute h-[6px] rounded-[3px] z-[2] left-[57%] top-[220px] w-[35%] ${statuses.Bus2 ? 'bg-[#89b4fa]' : 'bg-[#f38ba8]'}`} ref={nodeRefs.bus110_2}>
-              <span className="absolute -top-[16px] left-[5px] text-[9px] font-bold text-[#cdd6f4]">110 კვ სალტე - II სექცია</span>
+            <div className={`absolute h-[6px] rounded-[3px] z-[2] left-[57%] top-[220px] w-[35%] ${hasVoltageBus2 ? 'bg-[#89b4fa]' : 'bg-[#f38ba8]'}`} ref={nodeRefs.bus110_2}>
+              <span className="absolute -top-[16px] left-[5px] text-[9px] font-bold text-[#cdd6f4]">110 კვ სალტე - II {hasVoltageBus2 ? '(ძაბვით)' : '(უძაბვოდ)'}</span>
             </div>
 
-            {/* Feeders & Transformers (II სექციის ელემენტები გადატანილია მარჯვნივ 75%-ზე) */}
-            <div className={`absolute flex flex-col items-center p-[4px] rounded-[4px] text-center z-[3] w-[120px] -translate-x-1/2 border ${statuses.LineA && statuses.Bus1 ? 'bg-[#1e1e2e] border-[#a6e3a1]' : 'bg-[#2a171e] border-[#f38ba8]'}`} ref={nodeRefs.userA} style={{ left: '15%', top: '310px' }}>
+            {/* Feeders & Transformers */}
+            <div className={`absolute flex flex-col items-center p-[4px] rounded-[4px] text-center z-[3] w-[120px] -translate-x-1/2 border ${statuses.LineA && hasVoltageBus1 ? 'bg-[#1e1e2e] border-[#a6e3a1]' : 'bg-[#2a171e] border-[#f38ba8]'}`} ref={nodeRefs.userA} style={{ left: '15%', top: '310px' }}>
               <div className="text-[8px] font-bold text-[#cdd6f4]">🛣️ ეგხ "მაგისტრალი ა"</div>
               <div className="bg-[#11111b] text-[#fab387] font-mono text-[7px] px-[2px] py-[1px] rounded mt-[1px]">SEL-311L</div>
-              <div className="text-[7px] font-bold mt-[1px]" style={{ color: statuses.LineA && statuses.Bus1 ? '#a6e3a1' : '#f38ba8' }}>{statuses.LineA && statuses.Bus1 ? 'ჩართულია' : 'გათიშულია'}</div>
+              <div className="text-[7px] font-bold mt-[1px]" style={{ color: statuses.LineA && hasVoltageBus1 ? '#a6e3a1' : '#f38ba8' }}>{statuses.LineA && hasVoltageBus1 ? 'ჩართულია' : 'გათიშულია'}</div>
             </div>
 
-            <div className={`absolute flex flex-col items-center p-[4px] rounded-[4px] text-center z-[3] w-[125px] -translate-x-1/2 border ${statuses.T1 && statuses.Bus1 ? 'bg-[#1e1e2e] border-[#f9e2af]' : 'bg-[#2a171e] border-[#f38ba8]'}`} ref={nodeRefs.trans1} style={{ left: '32%', top: '310px' }}>
+            <div className={`absolute flex flex-col items-center p-[4px] rounded-[4px] text-center z-[3] w-[125px] -translate-x-1/2 border ${statuses.T1 && hasVoltageBus1 ? 'bg-[#1e1e2e] border-[#f9e2af]' : 'bg-[#2a171e] border-[#f38ba8]'}`} ref={nodeRefs.trans1} style={{ left: '32%', top: '310px' }}>
               <div className="text-[8px] font-bold text-[#cdd6f4]">⚡ ტრანსფ. T-1 (110/10კვ)</div>
               <div className="bg-[#11111b] text-[#fab387] font-mono text-[7px] px-[2px] py-[1px] rounded mt-[1px]">SEL-487E</div>
-              <div className="text-[7px] font-mono mt-[2px] text-[#89b4fa]">{`10kV: ${t1_LV_TotalCurrent}A | 110kV: ${t1_110_Current}A`}</div>
-              <div className="text-[7px] font-bold mt-[1px]" style={{ color: statuses.T1 && statuses.Bus1 ? '#a6e3a1' : '#f38ba8' }}>{statuses.T1 && statuses.Bus1 ? 'ჩართულია' : 'გათიშულია'}</div>
+              <div className="text-[7px] font-mono mt-[2px] text-[#89b4fa]">{`10kV: ${t1_LV_TotalCurrent}A`}</div>
+              <div className="text-[7px] font-bold mt-[1px]" style={{ color: statuses.T1 && hasVoltageBus1 ? '#a6e3a1' : '#f38ba8' }}>{statuses.T1 && hasVoltageBus1 ? 'ჩართულია' : 'გათიშულია'}</div>
             </div>
 
-            <div className={`absolute flex flex-col items-center p-[4px] rounded-[4px] text-center z-[3] w-[125px] -translate-x-1/2 border ${statuses.T2 && statuses.Bus2 ? 'bg-[#1e1e2e] border-[#f9e2af]' : 'bg-[#2a171e] border-[#f38ba8]'}`} ref={nodeRefs.trans2} style={{ left: '75%', top: '310px' }}>
+            <div className={`absolute flex flex-col items-center p-[4px] rounded-[4px] text-center z-[3] w-[125px] -translate-x-1/2 border ${statuses.T2 && hasVoltageBus2 ? 'bg-[#1e1e2e] border-[#f9e2af]' : 'bg-[#2a171e] border-[#f38ba8]'}`} ref={nodeRefs.trans2} style={{ left: '75%', top: '310px' }}>
               <div className="text-[8px] font-bold text-[#cdd6f4]">⚡ ტრანსფ. T-2 (110/35/6კვ)</div>
               <div className="bg-[#11111b] text-[#fab387] font-mono text-[7px] px-[2px] py-[1px] rounded mt-[1px]">SEL-487E</div>
               <div className="text-[7px] font-mono mt-[2px] text-[#89b4fa]">{`110kV: ${t2_110_Current}A`}</div>
-              <div className="text-[7px] font-bold mt-[1px]" style={{ color: statuses.T2 && statuses.Bus2 ? '#a6e3a1' : '#f38ba8' }}>{statuses.T2 && statuses.Bus2 ? 'ჩართულია' : 'გათიშულია'}</div>
+              <div className="text-[7px] font-bold mt-[1px]" style={{ color: statuses.T2 && hasVoltageBus2 ? '#a6e3a1' : '#f38ba8' }}>{statuses.T2 && hasVoltageBus2 ? 'ჩართულია' : 'გათიშულია'}</div>
             </div>
 
-            <div className={`absolute flex flex-col items-center p-[4px] rounded-[4px] text-center z-[3] w-[115px] -translate-x-1/2 border ${statuses.T1 && statuses.FeederCity ? 'bg-[#1e1e2e] border-[#a6e3a1]' : 'bg-[#2a171e] border-[#f38ba8]'}`} ref={nodeRefs.userB} style={{ left: '23%', top: '450px' }}>
+            <div className={`absolute flex flex-col items-center p-[4px] rounded-[4px] text-center z-[3] w-[115px] -translate-x-1/2 border ${statuses.T1 && hasVoltageBus1 && statuses.FeederCity ? 'bg-[#1e1e2e] border-[#a6e3a1]' : 'bg-[#2a171e] border-[#f38ba8]'}`} ref={nodeRefs.userB} style={{ left: '23%', top: '450px' }}>
               <div className="text-[8px] font-bold text-[#cdd6f4]">🏙️ ქალაქის ფიდერი (10 კვ)</div>
               <div className="bg-[#11111b] text-[#fab387] font-mono text-[7px] px-[2px] py-[1px] rounded mt-[1px]">SEL-351A</div>
-              <div className="text-[7px] font-bold mt-[1px]" style={{ color: statuses.T1 && statuses.FeederCity ? '#a6e3a1' : '#f38ba8' }}>{statuses.T1 && statuses.FeederCity ? 'ჩართულია' : 'გათიშულია'}</div>
+              <div className="text-[7px] font-bold mt-[1px]" style={{ color: statuses.T1 && hasVoltageBus1 && statuses.FeederCity ? '#a6e3a1' : '#f38ba8' }}>{statuses.T1 && hasVoltageBus1 && statuses.FeederCity ? 'ჩართულია' : 'უძაბვოდ'}</div>
             </div>
 
-            <div className={`absolute flex flex-col items-center p-[4px] rounded-[4px] text-center z-[3] w-[120px] -translate-x-1/2 border ${statuses.T1 && statuses.FeederReg ? 'bg-[#1e1e2e] border-[#a6e3a1]' : 'bg-[#2a171e] border-[#f38ba8]'}`} ref={nodeRefs.userE} style={{ left: '41%', top: '450px' }}>
+            <div className={`absolute flex flex-col items-center p-[4px] rounded-[4px] text-center z-[3] w-[120px] -translate-x-1/2 border ${statuses.T1 && hasVoltageBus1 && statuses.FeederReg ? 'bg-[#1e1e2e] border-[#a6e3a1]' : 'bg-[#2a171e] border-[#f38ba8]'}`} ref={nodeRefs.userE} style={{ left: '41%', top: '450px' }}>
               <div className="text-[8px] font-bold text-[#cdd6f4]">📐 რეგიონული ფიდერი (10 კვ)</div>
               <div className="bg-[#11111b] text-[#fab387] font-mono text-[7px] px-[2px] py-[1px] rounded mt-[1px]">SEL-351S</div>
-              <div className="text-[7px] font-bold mt-[1px]" style={{ color: statuses.T1 && statuses.FeederReg ? '#a6e3a1' : '#f38ba8' }}>{statuses.T1 && statuses.FeederReg ? 'ჩართულია' : 'გათიშულია'}</div>
+              <div className="text-[7px] font-bold mt-[1px]" style={{ color: statuses.T1 && hasVoltageBus1 && statuses.FeederReg ? '#a6e3a1' : '#f38ba8' }}>{statuses.T1 && hasVoltageBus1 && statuses.FeederReg ? 'ჩართულია' : 'უძაბვოდ'}</div>
             </div>
 
-            <div className={`absolute flex flex-col items-center p-[4px] rounded-[4px] text-center z-[3] w-[115px] -translate-x-1/2 border ${statuses.T2 && statuses.Feeder35 ? 'bg-[#1e1e2e] border-[#a6e3a1]' : 'bg-[#2a171e] border-[#f38ba8]'}`} ref={nodeRefs.userC} style={{ left: '67%', top: '450px' }}>
+            <div className={`absolute flex flex-col items-center p-[4px] rounded-[4px] text-center z-[3] w-[115px] -translate-x-1/2 border ${statuses.T2 && hasVoltageBus2 && statuses.Feeder35 ? 'bg-[#1e1e2e] border-[#a6e3a1]' : 'bg-[#2a171e] border-[#f38ba8]'}`} ref={nodeRefs.userC} style={{ left: '67%', top: '450px' }}>
               <div className="text-[8px] font-bold text-[#cdd6f4]">🏭 ქარხნის ხაზი (35 კვ)</div>
               <div className="bg-[#11111b] text-[#fab387] font-mono text-[7px] px-[2px] py-[1px] rounded mt-[1px]">SEL-421</div>
-              <div className="text-[7px] font-bold mt-[1px]" style={{ color: statuses.T2 && statuses.Feeder35 ? '#a6e3a1' : '#f38ba8' }}>{statuses.T2 && statuses.Feeder35 ? 'ჩართულია' : 'გათიშულია'}</div>
+              <div className="text-[7px] font-bold mt-[1px]" style={{ color: statuses.T2 && hasVoltageBus2 && statuses.Feeder35 ? '#a6e3a1' : '#f38ba8' }}>{statuses.T2 && hasVoltageBus2 && statuses.Feeder35 ? 'ჩართულია' : 'უძაბვოდ'}</div>
             </div>
 
-            <div className={`absolute flex flex-col items-center p-[4px] rounded-[4px] text-center z-[3] w-[115px] -translate-x-1/2 border ${statuses.T2 && statuses.Motor6 ? 'bg-[#1e1e2e] border-[#a6e3a1]' : 'bg-[#2a171e] border-[#f38ba8]'}`} ref={nodeRefs.userD} style={{ left: '83%', top: '450px' }}>
+            <div className={`absolute flex flex-col items-center p-[4px] rounded-[4px] text-center z-[3] w-[115px] -translate-x-1/2 border ${statuses.T2 && hasVoltageBus2 && statuses.Motor6 ? 'bg-[#1e1e2e] border-[#a6e3a1]' : 'bg-[#2a171e] border-[#f38ba8]'}`} ref={nodeRefs.userD} style={{ left: '83%', top: '450px' }}>
               <div className="text-[8px] font-bold text-[#cdd6f4]">⚙️ ასინქ. ძრავა (6 კვ)</div>
               <div className="bg-[#11111b] text-[#fab387] font-mono text-[7px] px-[2px] py-[1px] rounded mt-[1px]">SEL-701</div>
-              <div className="text-[7px] font-bold mt-[1px]" style={{ color: statuses.T2 && statuses.Motor6 ? '#a6e3a1' : '#f38ba8' }}>{statuses.T2 && statuses.Motor6 ? 'ჩართულია' : 'გათიშულია'}</div>
+              <div className="text-[7px] font-bold mt-[1px]" style={{ color: statuses.T2 && hasVoltageBus2 && statuses.Motor6 ? '#a6e3a1' : '#f38ba8' }}>{statuses.T2 && hasVoltageBus2 && statuses.Motor6 ? 'ჩართულია' : 'უძაბვოდ'}</div>
             </div>
 
             <div className="absolute bottom-[6px] right-[10px] text-[9px] text-[#a6adc8] font-mono opacity-80">
@@ -566,14 +592,14 @@ export default function App() {
           </div>
         </div>
 
-        {/* Right Side Panel: SCADA telemetry & Logs */}
+        {/* Right Side Panel */}
         <div className="bg-[#161622] rounded-[6px] p-[10px] shadow-lg border border-[#313244] flex flex-col gap-3">
           
           <button className="bg-[#a6e3a1] text-[#11111b] text-[12px] w-full p-[8px] rounded font-bold cursor-pointer hover:bg-[#90d98b] transition-colors flex items-center justify-center gap-1 shadow" onClick={resetSystem}>
             🔄 სისტემის სრული აღდგენა (Reset)
           </button>
 
-          {/* SCADA Telemetry Block */}
+          {/* SCADA Telemetry */}
           <div className="bg-[#0b0b12] rounded p-[8px] border border-[#313244]">
             <h3 className="m-0 text-[11px] text-[#89b4fa] font-bold border-b border-[#313244] pb-[4px] mb-[6px] flex items-center justify-between">
               <span>📡 SCADA ტელემეტრია & ავარიის მონაცემები</span>
